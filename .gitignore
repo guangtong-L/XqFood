@@ -1,0 +1,50 @@
+# ===== Java / Maven =====
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.iml
+.idea/
+.mvn/
+mvnw
+mvnw.cmd
+HELP.md
+
+# ===== Node / uni-app =====
+node_modules/
+dist/
+unpackage/
+.hbuilderx/
+
+# ===== IDE / OS =====
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
+
+# ===== Env / Secrets =====
+.env
+.env.local
+*.local
+application-prod.yml
+application-secret.yml
+application-local.yml
+application-local.yaml
+*-secret.*
+
+# ===== AI Keys / Credentials =====
+**/secrets/
+**/keys/
+*.pem
+*.key
+
+# ===== Logs =====
+logs/
+*.log
+log/
+
+# ===== Temp =====
+*.tmp
+*.temp
+*.swp

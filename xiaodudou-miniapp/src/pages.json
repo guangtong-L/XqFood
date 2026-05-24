@@ -1,0 +1,128 @@
+{
+    "easycom": {
+        "autoscan": true,
+        "custom": {
+            "^wd-(.*)": "wot-design-uni/components/wd-$1/wd-$1.vue"
+        }
+    },
+    "pages": [
+        {
+            "path": "pages/index/index",
+            "style": {
+                "navigationBarTitleText": "小肚兜AI",
+                "enablePullDownRefresh": true
+            }
+        },
+        {
+            "path": "pages/auth/wx-login",
+            "style": {
+                "navigationBarTitleText": "登录",
+                "navigationStyle": "custom"
+            }
+        },
+        {
+            "path": "pages/recipe/list",
+            "style": {
+                "navigationBarTitleText": "菜谱"
+            }
+        },
+        {
+            "path": "pages/recipe/detail",
+            "style": {
+                "navigationBarTitleText": "菜谱详情"
+            }
+        },
+        {
+            "path": "pages/camera/index",
+            "style": {
+                "navigationBarTitleText": "拍冰箱出菜谱"
+            }
+        },
+        {
+            "path": "pages/camera/result",
+            "style": {
+                "navigationBarTitleText": "识别结果"
+            }
+        },
+        {
+            "path": "pages/camera/recommend",
+            "style": {
+                "navigationBarTitleText": "AI推荐"
+            }
+        },
+        {
+            "path": "pages/community/index",
+            "style": {
+                "navigationBarTitleText": "妈妈圈"
+            }
+        },
+        {
+            "path": "pages/me/index",
+            "style": {
+                "navigationBarTitleText": "我的"
+            }
+        },
+        {
+            "path": "pages/profile/setup",
+            "style": {
+                "navigationBarTitleText": "完善信息"
+            }
+        },
+        {
+            "path": "pages/me/favorites",
+            "style": {
+                "navigationBarTitleText": "我的收藏"
+            }
+        },
+        {
+            "path": "pages/me/checkin",
+            "style": {
+                "navigationBarTitleText": "打卡日历"
+            }
+        }
+    ],
+    "globalStyle": {
+        "navigationBarTextStyle": "black",
+        "navigationBarTitleText": "小肚兜AI",
+        "navigationBarBackgroundColor": "#FFFFFF",
+        "backgroundColor": "#F7F7F7"
+    },
+    "tabBar": {
+        "color": "#999999",
+        "selectedColor": "#FF8866",
+        "backgroundColor": "#FFFFFF",
+        "borderStyle": "black",
+        "list": [
+            {
+                "pagePath": "pages/index/index",
+                "text": "首页",
+                "iconPath": "static/tabbar/home.png",
+                "selectedIconPath": "static/tabbar/home-active.png"
+            },
+            {
+                "pagePath": "pages/recipe/list",
+                "text": "菜谱",
+                "iconPath": "static/tabbar/recipe.png",
+                "selectedIconPath": "static/tabbar/recipe-active.png"
+            },
+            {
+                "pagePath": "pages/camera/index",
+                "text": "拍照",
+                "iconPath": "static/tabbar/camera.png",
+                "selectedIconPath": "static/tabbar/camera-active.png"
+            },
+            {
+                "pagePath": "pages/community/index",
+                "text": "圈子",
+                "iconPath": "static/tabbar/community.png",
+                "selectedIconPath": "static/tabbar/community-active.png"
+            },
+            {
+                "pagePath": "pages/me/index",
+                "text": "我的",
+                "iconPath": "static/tabbar/me.png",
+                "selectedIconPath": "static/tabbar/me-active.png"
+            }
+        ]
+    }
+}

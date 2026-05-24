@@ -1,0 +1,43 @@
+{
+    "name": "小肚兜AI",
+    "appid": "",
+    "description": "小肚兜 AI - 母婴营养小程序",
+    "versionName": "0.0.1",
+    "versionCode": 1,
+    "transformPx": false,
+    "app-plus": {
+        "usingComponents": true,
+        "nvueStyleCompiler": "uni-app",
+        "compilerVersion": 3,
+        "splashscreen": {
+            "alwaysShowBeforeRender": true,
+            "waiting": true,
+            "autoclose": true,
+            "delay": 0
+        }
+    },
+    "mp-weixin": {
+        "appid": "TODO_REPLACE_WITH_REAL_APPID",
+        "setting": {
+            "urlCheck": false,
+            "es6": true,
+            "minified": true,
+            "postcss": true
+        },
+        "usingComponents": true,
+        "lazyCodeLoading": "requiredComponents",
+        "permission": {
+            "scope.userLocation": {
+                "desc": "你的位置信息将用于推荐附近食材采购点"
+            }
+        },
+        "requiredPrivateInfos": ["chooseImage"]
+    },
+    "h5": {
+        "router": {
+            "base": "/"
+        },
+        "title": "小肚兜AI"
+    },
+    "vueVersion": "3"
+}

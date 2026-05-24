@@ -1,0 +1,63 @@
+# ============================
+# 开发环境配置
+# ⚠️ 上线时切换到 application-prod.yml，并将敏感信息走环境变量
+# ============================
+
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    # 端口 3307 走 Docker MySQL 8（避开本机已有的 5.7）
+    url: jdbc:mysql://localhost:3307/xiaodudou?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: xiaodudou
+    password: XddApp@2026Mysql!    # 与 D:\docker\xiaodudou\.env 一致
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password: XddRedis@2026!     # 与 D:\docker\xiaodudou\.env 一致
+      database: 0
+      timeout: 5s
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+
+# ============================
+# 第三方 AI 服务
+# ⚠️ 真实 Key 通过环境变量注入，不要写死提交 Git
+# ============================
+xiaodudou:
+  ai:
+    zhipu:
+      api-key: ${ZHIPU_API_KEY:your-zhipu-key-here}
+      base-url: https://open.bigmodel.cn/api/paas/v4
+      model-vision: glm-4v-plus
+      model-chat: glm-4-plus
+      timeout-ms: 8000
+    tongyi:
+      api-key: ${TONGYI_API_KEY:your-tongyi-key-here}
+      base-url: https://dashscope.aliyuncs.com/api/v1
+  wechat:
+    miniapp:
+      appid: ${WX_APPID:your-wx-appid}
+      secret: ${WX_SECRET:your-wx-secret}
+  content-audit:
+    tencent:
+      secret-id: ${TENCENT_SECRET_ID:}
+      secret-key: ${TENCENT_SECRET_KEY:}
+  rate-limit:
+    free-user-ai-daily: 3          # 免费用户 AI 每日次数
+    vip-user-ai-daily: 30          # 会员每日次数
+
+logging:
+  level:
+    root: INFO
+    ai.xiaodudou: DEBUG
+    org.springframework.web: INFO

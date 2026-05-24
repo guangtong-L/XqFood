@@ -1,0 +1,63 @@
+spring:
+  application:
+    name: xiaodudou-server
+  profiles:
+    # local 覆盖 dev 的占位 key（local 已 gitignore）
+    active: dev,local
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: GMT+8
+    default-property-inclusion: non_null
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 8MB
+      max-request-size: 10MB
+
+server:
+  port: 8080
+  servlet:
+    context-path: /
+  tomcat:
+    max-http-form-post-size: 10MB
+
+# MyBatis-Plus
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      id-type: ASSIGN_ID
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+  mapper-locations: classpath*:/mapper/**/*.xml
+
+# Sa-Token 鉴权
+sa-token:
+  token-name: x-token
+  timeout: 2592000              # 30 天
+  active-timeout: -1
+  is-concurrent: true
+  is-share: false
+  token-style: uuid
+  is-log: false
+
+# Knife4j
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn
+    enable-version: true
+  openapi:
+    title: 小肚兜 AI - API 文档
+    description: 母婴营养小程序后端接口
+    version: v0.1
+    concat: contact@xiaodudou.ai
+    group:
+      default:
+        group-name: 默认分组
+        api-rule: package
+        api-rule-resources:
+          - ai.xiaodudou
