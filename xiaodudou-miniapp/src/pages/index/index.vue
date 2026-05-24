@@ -69,15 +69,18 @@
         <view class="ne-btn" @tap="goCheckin">开始打卡</view>
       </view>
 
-      <!-- 有打卡数据时（M2 接真实数据） -->
+      <!-- 有打卡数据，真实雷达 -->
       <view v-else class="nutrition-list">
-        <view class="nutrition-item" v-for="n in nutrition" :key="n.name">
+        <view class="nutrition-item" v-for="n in topNutrition" :key="n.key">
           <view class="nutrition-name">{{ n.name }}</view>
           <view class="nutrition-bar">
-            <view class="nutrition-bar-inner" :style="{ width: n.percent + '%' }"></view>
+            <view class="nutrition-bar-inner"
+                  :class="{ over: n.percent > 100 }"
+                  :style="{ width: Math.min(100, n.percent) + '%' }"></view>
           </view>
-          <view class="nutrition-percent">{{ n.percent }}%</view>
+          <view class="nutrition-percent" :class="{ over: n.percent > 100 }">{{ n.percent }}%</view>
         </view>
+        <view class="nutrition-tip">已打卡 {{ todayCheckinCount }} 餐 · 目标按"{{ topNutritionStage }}"计算</view>
       </view>
     </view>
   </view>
@@ -89,6 +92,7 @@ import { onShow } from '@dcloudio/uni-app'
 import { useUserStore } from '../../store/user'
 import { recipeApi, type Recipe } from '../../api/recipe'
 import { checkinApi } from '../../api/checkin'
+import { nutritionApi, type NutritionItem } from '../../api/nutrition'
 import { feedback } from '../../utils/feedback'
 
 const userStore = useUserStore()
@@ -121,22 +125,39 @@ const stageFocus = computed(() => {
   return '均衡营养'
 })
 
-const nutrition = ref([
-  { name: '蛋白质', percent: 80 },
-  { name: '钙', percent: 60 },
-  { name: '铁', percent: 50 }
-])
-
-// 今日是否有打卡（M2 营养雷达接真实数据时再用 nutrition 计算）
+// 真实营养数据
+const nutritionItems = ref<NutritionItem[]>([])
 const todayCheckinCount = ref(0)
 const hasCheckin = computed(() => todayCheckinCount.value > 0)
 
-async function loadCheckinToday() {
-  if (!userStore.isLoggedIn) { todayCheckinCount.value = 0; return }
+// 首页只显示 4 个核心维度（热量/蛋白/钙/铁）
+const topNutrition = computed(() =>
+  nutritionItems.value.filter(n => ['calories','protein','calcium','iron'].includes(n.key))
+)
+
+const STAGE_LABEL: Record<string, string> = {
+  PREPARE: '备孕', PREGNANCY: '孕期', POSTPARTUM: '哺乳期',
+  WEANING: '辅食期', CHILD: '儿童期'
+}
+const topNutritionStage = computed(() => {
+  const s = userStore.profile?.stageType
+  return s ? (STAGE_LABEL[s] || s) : '通用'
+})
+
+async function loadNutrition() {
+  if (!userStore.isLoggedIn) {
+    nutritionItems.value = []
+    todayCheckinCount.value = 0
+    return
+  }
   try {
-    const list = await checkinApi.today()
-    todayCheckinCount.value = list?.length || 0
-  } catch { todayCheckinCount.value = 0 }
+    const data = await nutritionApi.today()
+    nutritionItems.value = data.items || []
+    todayCheckinCount.value = data.checkinCount || 0
+  } catch {
+    nutritionItems.value = []
+    todayCheckinCount.value = 0
+  }
 }
 
 function goCheckin() {
@@ -161,7 +182,7 @@ onShow(async () => {
     await userStore.loadMe()
   }
   await loadRecipes()
-  await loadCheckinToday()
+  await loadNutrition()
 })
 
 function goLogin() { uni.navigateTo({ url: '/pages/auth/wx-login' }) }
@@ -215,10 +236,15 @@ function goDetail(id: string) { uni.navigateTo({ url: `/pages/recipe/detail?id=$
   .nutrition-item { display: flex; align-items: center; margin-bottom: 16rpx;
     .nutrition-name { width: 100rpx; font-size: 26rpx; }
     .nutrition-bar { flex: 1; height: 16rpx; background: #f0f0f0; border-radius: 8rpx; overflow: hidden; margin: 0 16rpx;
-      .nutrition-bar-inner { height: 100%; background: linear-gradient(90deg, #FF8866, #FFB199); }
+      .nutrition-bar-inner { height: 100%; background: linear-gradient(90deg, #FF8866, #FFB199); transition: width .3s;
+        &.over { background: linear-gradient(90deg, #4CAF50, #81C784); }
+      }
     }
-    .nutrition-percent { width: 60rpx; font-size: 24rpx; color: #999; text-align: right; }
+    .nutrition-percent { width: 80rpx; font-size: 24rpx; color: #999; text-align: right;
+      &.over { color: #4CAF50; font-weight: 500; }
+    }
   }
+  .nutrition-tip { font-size: 22rpx; color: #ccc; text-align: center; margin-top: 16rpx; }
 }
 .nutrition-empty {
   text-align: center; padding: 24rpx 16rpx;

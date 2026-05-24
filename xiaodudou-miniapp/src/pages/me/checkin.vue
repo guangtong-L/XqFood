@@ -62,6 +62,26 @@
       </view>
     </view>
 
+    <!-- 营养摄入雷达 -->
+    <view class="nutrition-section" v-if="nutritionItems.length">
+      <view class="section-title">🍎 今日营养（{{ stageLabel }} 目标）</view>
+      <view class="nutri-list">
+        <view v-for="n in nutritionItems" :key="n.key" class="nutri-row">
+          <view class="nutri-name">{{ n.name }}</view>
+          <view class="nutri-bar">
+            <view class="nutri-bar-inner" :class="{ over: n.percent > 100 }"
+                  :style="{ width: Math.min(100, n.percent) + '%' }"></view>
+          </view>
+          <view class="nutri-val">
+            <text class="actual">{{ n.actual }}</text>
+            <text class="sep"> / </text>
+            <text class="target">{{ n.target }}{{ n.unit }}</text>
+          </view>
+          <view class="nutri-pct" :class="{ over: n.percent > 100 }">{{ n.percent }}%</view>
+        </view>
+      </view>
+    </view>
+
     <button class="btn-add" @tap="goRecipes">+ 选菜打卡</button>
   </view>
 </template>
@@ -70,9 +90,12 @@
 import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { checkinApi, type CalendarData, type CheckinItem } from '../../api/checkin'
+import { nutritionApi, type NutritionItem } from '../../api/nutrition'
 
 const data = ref<CalendarData | null>(null)
 const todayList = ref<CheckinItem[]>([])
+const nutritionItems = ref<NutritionItem[]>([])
+const stageLabel = ref('')
 
 // 当前选中月份（YYYY-MM）
 const now = new Date()
@@ -140,6 +163,14 @@ async function loadToday() {
   } catch (e) { console.error(e) }
 }
 
+async function loadNutrition() {
+  try {
+    const d = await nutritionApi.today()
+    nutritionItems.value = d.items || []
+    stageLabel.value = d.stageLabel || ''
+  } catch (e) { nutritionItems.value = [] }
+}
+
 function formatTime(s: string) {
   // s 形如 "2026-05-23T12:34:56"
   const m = s.match(/T(\d{2}:\d{2})/)
@@ -149,7 +180,7 @@ function formatTime(s: string) {
 function goDetail(id: string) { uni.navigateTo({ url: `/pages/recipe/detail?id=${id}` }) }
 function goRecipes() { uni.switchTab({ url: '/pages/recipe/list' }) }
 
-onShow(() => { loadCalendar(); loadToday() })
+onShow(() => { loadCalendar(); loadToday(); loadNutrition() })
 </script>
 
 <style lang="scss" scoped>
@@ -209,5 +240,24 @@ onShow(() => { loadCalendar(); loadToday() })
   background: #FF8866; color: #fff;
   height: 88rpx; line-height: 88rpx; border-radius: 44rpx;
   font-size: 30rpx; box-shadow: 0 8rpx 24rpx rgba(255,136,102,0.4);
+}
+
+.nutrition-section { background: #fff; border-radius: 24rpx; padding: 24rpx; margin-bottom: 24rpx;
+  .section-title { font-size: 28rpx; font-weight: 600; margin-bottom: 24rpx; }
+  .nutri-list .nutri-row { display: flex; align-items: center; padding: 12rpx 0;
+    .nutri-name { width: 80rpx; font-size: 24rpx; color: #666; }
+    .nutri-bar { flex: 1; height: 14rpx; background: #f0f0f0; border-radius: 7rpx; overflow: hidden; margin: 0 12rpx;
+      .nutri-bar-inner { height: 100%; background: linear-gradient(90deg, #FF8866, #FFB199); transition: width .3s;
+        &.over { background: linear-gradient(90deg, #4CAF50, #81C784); }
+      }
+    }
+    .nutri-val { font-size: 20rpx; color: #999; width: 160rpx; text-align: right;
+      .actual { color: #FF6644; font-weight: 500; }
+      .sep { color: #ccc; }
+    }
+    .nutri-pct { font-size: 22rpx; color: #999; width: 70rpx; text-align: right;
+      &.over { color: #4CAF50; font-weight: 600; }
+    }
+  }
 }
 </style>
