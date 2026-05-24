@@ -53,8 +53,9 @@ xiaodudou:
       secret-id: ${TENCENT_SECRET_ID:}
       secret-key: ${TENCENT_SECRET_KEY:}
   rate-limit:
-    free-user-ai-daily: 3          # 免费用户 AI 每日次数
-    vip-user-ai-daily: 30          # 会员每日次数
+    ai-free-daily: 5         # 免费用户每日 AI 调用（识别+推荐合并）
+    ai-vip-daily: 50         # 会员每日
+    ai-burst-per-min: 3      # 每用户每分钟最多 3 次（防刷点击）
 
 logging:
   level:
