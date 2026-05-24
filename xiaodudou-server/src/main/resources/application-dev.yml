@@ -48,6 +48,8 @@ xiaodudou:
     miniapp:
       appid: ${WX_APPID:your-wx-appid}
       secret: ${WX_SECRET:your-wx-secret}
+      enabled: false               # 没 AppID 时 false，自动走 Mock 登录
+      timeout-ms: 5000
   content-audit:
     tencent:
       secret-id: ${TENCENT_SECRET_ID:}

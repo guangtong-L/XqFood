@@ -21,7 +21,12 @@
       </view>
     </view>
 
-    <view class="dev-tip">M1 Mock 模式：未集成真实微信登录，点击即创建测试账号</view>
+    <!-- #ifndef MP-WEIXIN -->
+    <view class="dev-tip">H5 演示模式 · 微信小程序端将走真实登录</view>
+    <!-- #endif -->
+    <!-- #ifdef MP-WEIXIN -->
+    <view class="dev-tip">点击即调用微信授权登录</view>
+    <!-- #endif -->
   </view>
 </template>
 
@@ -34,6 +39,31 @@ const userStore = useUserStore()
 const loading = ref(false)
 const agreed = ref(true)
 
+/**
+ * 获取登录 code
+ * - 微信小程序：调用 uni.login 拿到真实 code
+ * - H5/其他：用稳定 mock code（同设备同账号）
+ */
+function getLoginCode(): Promise<string> {
+  return new Promise((resolve) => {
+    // #ifdef MP-WEIXIN
+    uni.login({
+      provider: 'weixin',
+      success: (res) => {
+        if (res.code) resolve(res.code)
+        else resolve('mock_fallback_' + Date.now())
+      },
+      fail: () => resolve('mock_fallback_' + Date.now())
+    })
+    // #endif
+    // #ifndef MP-WEIXIN
+    const stable = uni.getStorageSync('mock_code') || `mock_${Date.now()}`
+    uni.setStorageSync('mock_code', stable)
+    resolve(stable)
+    // #endif
+  })
+}
+
 async function doLogin() {
   if (!agreed.value) {
     uni.showToast({ title: '请先同意协议', icon: 'none' })
@@ -41,18 +71,21 @@ async function doLogin() {
   }
   loading.value = true
   try {
-    // M1 Mock：用一个稳定 code 让同一设备登录的是同一账号
-    const stableCode = uni.getStorageSync('mock_code') || `mock_${Date.now()}`
-    uni.setStorageSync('mock_code', stableCode)
+    const code = await getLoginCode()
 
     const resp = await authApi.wxLogin({
-      code: stableCode,
+      code,
       nickname: '小肚兜妈妈',
       avatarUrl: 'https://placehold.co/120x120/FF8866/ffffff?text=Mom'
     })
 
     userStore.setToken(resp.token)
     await userStore.loadMe()
+
+    // 提示登录模式（H5/小程序未配 AppID 时是 mock）
+    if ((resp as any).loginMode === 'mock') {
+      console.log('[Auth] 当前为 Mock 登录模式（后端未配置真实微信 AppID）')
+    }
 
     // 已有阶段画像 → 进首页；否则 → 引导画像
     if (userStore.profile?.stageType) {
