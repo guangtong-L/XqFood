@@ -79,6 +79,43 @@
             "style": {
                 "navigationBarTitleText": "打卡日历"
             }
+        },
+        {
+            "path": "pages/onboarding/index",
+            "style": {
+                "navigationBarTitleText": "欢迎",
+                "navigationStyle": "custom"
+            }
+        },
+        {
+            "path": "pages/legal/privacy",
+            "style": {
+                "navigationBarTitleText": "隐私政策"
+            }
+        },
+        {
+            "path": "pages/legal/terms",
+            "style": {
+                "navigationBarTitleText": "用户协议"
+            }
+        },
+        {
+            "path": "pages/help/index",
+            "style": {
+                "navigationBarTitleText": "帮助与客服"
+            }
+        },
+        {
+            "path": "pages/vip/center",
+            "style": {
+                "navigationBarTitleText": "开通会员"
+            }
+        },
+        {
+            "path": "pages/order/list",
+            "style": {
+                "navigationBarTitleText": "我的订单"
+            }
         }
     ],
     "globalStyle": {

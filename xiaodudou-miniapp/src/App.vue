@@ -8,6 +8,14 @@ onLaunch(async () => {
   if (userStore.isLoggedIn) {
     await userStore.loadMe()
   }
+
+  // 首次启动跳引导页（未登录用户）
+  const onboardingDone = uni.getStorageSync('onboarding_done')
+  if (!onboardingDone && !userStore.isLoggedIn) {
+    setTimeout(() => {
+      uni.reLaunch({ url: '/pages/onboarding/index' })
+    }, 100)
+  }
 })
 </script>
 

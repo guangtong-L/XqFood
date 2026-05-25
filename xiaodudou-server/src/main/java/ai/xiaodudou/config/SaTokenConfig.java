@@ -1,5 +1,6 @@
 package ai.xiaodudou.config;
 
+import cn.dev33.satoken.context.SaHolder;
 import cn.dev33.satoken.interceptor.SaInterceptor;
 import cn.dev33.satoken.stp.StpUtil;
 import org.springframework.context.annotation.Configuration;
@@ -16,7 +17,13 @@ public class SaTokenConfig implements WebMvcConfigurer {
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(new SaInterceptor(handler -> StpUtil.checkLogin()))
+        registry.addInterceptor(new SaInterceptor(handler -> {
+                    // 放行浏览器预检请求，否则前端会被误判为跨域失败
+                    if ("OPTIONS".equalsIgnoreCase(SaHolder.getRequest().getMethod())) {
+                        return;
+                    }
+                    StpUtil.checkLogin();
+                }))
                 .addPathPatterns("/api/**")
                 .excludePathPatterns(
                         "/api/v1/health",

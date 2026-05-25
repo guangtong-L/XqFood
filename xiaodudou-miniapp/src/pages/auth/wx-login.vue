@@ -15,9 +15,9 @@
       <view class="agree">
         <text class="check" @tap="agreed = !agreed">{{ agreed ? '☑' : '☐' }}</text>
         <text>我已阅读并同意</text>
-        <text class="link">《用户协议》</text>
+        <text class="link" @tap.stop="openLegal('terms')">《用户协议》</text>
         <text>和</text>
-        <text class="link">《隐私政策》</text>
+        <text class="link" @tap.stop="openLegal('privacy')">《隐私政策》</text>
       </view>
     </view>
 
@@ -44,6 +44,10 @@ const agreed = ref(true)
  * - 微信小程序：调用 uni.login 拿到真实 code
  * - H5/其他：用稳定 mock code（同设备同账号）
  */
+function openLegal(type: 'terms' | 'privacy') {
+  uni.navigateTo({ url: `/pages/legal/${type}` })
+}
+
 function getLoginCode(): Promise<string> {
   return new Promise((resolve) => {
     // #ifdef MP-WEIXIN

@@ -50,6 +50,12 @@ xiaodudou:
       secret: ${WX_SECRET:your-wx-secret}
       enabled: false               # 没 AppID 时 false，自动走 Mock 登录
       timeout-ms: 5000
+    pay:
+      enabled: false               # 没商户号时 false，订单自动 Mock 支付成功
+      mch-id: ${WX_PAY_MCHID:}
+      api-key: ${WX_PAY_KEY:}
+  order:
+    expire-minutes: 30             # 订单 30 分钟未支付自动过期
   content-audit:
     tencent:
       secret-id: ${TENCENT_SECRET_ID:}

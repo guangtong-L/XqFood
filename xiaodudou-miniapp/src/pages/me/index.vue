@@ -14,12 +14,12 @@
         <view class="stage" @tap="goSetup">{{ stageLabel }} ›</view>
       </view>
 
-      <view class="vip-card">
+      <view class="vip-card" @tap="goVip">
         <view class="vip-info">
           <view class="vip-title">{{ vipTitle }}</view>
           <view class="vip-sub">{{ vipSub }}</view>
         </view>
-        <button class="btn-renew">{{ userStore.user?.vipLevel ? '续费' : '开通' }}</button>
+        <button class="btn-renew" @tap.stop="goVip">{{ userStore.user?.vipLevel ? '续费' : '开通' }}</button>
       </view>
 
       <view class="menu">
@@ -32,8 +32,10 @@
         <view class="menu-item"><text>📊 营养报告 <text class="soon">即将上线</text></text><text class="arrow">›</text></view>
         <view class="menu-item"><text>👨‍👩‍👧 家人协作 <text class="soon">即将上线</text></text><text class="arrow">›</text></view>
         <view class="menu-item"><text>💬 营养师咨询 <text class="soon">即将上线</text></text><text class="arrow">›</text></view>
-        <view class="menu-item"><text>🛒 我的订单 <text class="soon">即将上线</text></text><text class="arrow">›</text></view>
-        <view class="menu-item"><text>⚙️ 设置 <text class="soon">即将上线</text></text><text class="arrow">›</text></view>
+        <view class="menu-item" @tap="goOrders"><text>🛒 我的订单</text><text class="arrow">›</text></view>
+        <view class="menu-item" @tap="goHelp"><text>💁‍♀️ 帮助与客服</text><text class="arrow">›</text></view>
+        <view class="menu-item" @tap="goLegal('terms')"><text>📜 用户协议</text><text class="arrow">›</text></view>
+        <view class="menu-item" @tap="goLegal('privacy')"><text>🔒 隐私政策</text><text class="arrow">›</text></view>
         <view class="menu-item logout" @tap="doLogout"><text>🚪 退出登录</text></view>
       </view>
     </template>
@@ -72,6 +74,23 @@ function goFavorites() {
 function goCheckin() {
   if (!userStore.isLoggedIn) return
   uni.navigateTo({ url: '/pages/me/checkin' })
+}
+function goVip() {
+  if (!userStore.isLoggedIn) {
+    uni.navigateTo({ url: '/pages/auth/wx-login' })
+    return
+  }
+  uni.navigateTo({ url: '/pages/vip/center' })
+}
+function goOrders() {
+  if (!userStore.isLoggedIn) return
+  uni.navigateTo({ url: '/pages/order/list' })
+}
+function goHelp() {
+  uni.navigateTo({ url: '/pages/help/index' })
+}
+function goLegal(type: 'terms' | 'privacy') {
+  uni.navigateTo({ url: `/pages/legal/${type}` })
 }
 
 const stageLabel = computed(() => {
