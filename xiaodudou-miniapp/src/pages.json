@@ -116,6 +116,30 @@
             "style": {
                 "navigationBarTitleText": "我的订单"
             }
+        },
+        {
+            "path": "pages/me/settings",
+            "style": {
+                "navigationBarTitleText": "设置"
+            }
+        },
+        {
+            "path": "pages/report/index",
+            "style": {
+                "navigationBarTitleText": "营养报告"
+            }
+        },
+        {
+            "path": "pages/error/404",
+            "style": {
+                "navigationBarTitleText": "页面不见啦"
+            }
+        },
+        {
+            "path": "pages/error/network-error",
+            "style": {
+                "navigationBarTitleText": "网络异常"
+            }
         }
     ],
     "globalStyle": {

@@ -29,13 +29,14 @@
           <text class="arrow">{{ favCount > 0 ? favCount : '' }} ›</text>
         </view>
         <view class="menu-item" @tap="goCheckin"><text>📅 打卡日历</text><text class="arrow">›</text></view>
-        <view class="menu-item"><text>📊 营养报告 <text class="soon">即将上线</text></text><text class="arrow">›</text></view>
-        <view class="menu-item"><text>👨‍👩‍👧 家人协作 <text class="soon">即将上线</text></text><text class="arrow">›</text></view>
-        <view class="menu-item"><text>💬 营养师咨询 <text class="soon">即将上线</text></text><text class="arrow">›</text></view>
+        <view class="menu-item" @tap="goReport"><text>📊 营养报告</text><text class="arrow">›</text></view>
+        <view class="menu-item" @tap="comingSoon('family')"><text>👨‍👩‍👧 家人协作 <text class="soon">M3 上线</text></text><text class="arrow">›</text></view>
+        <view class="menu-item" @tap="comingSoon('expert')"><text>💬 营养师咨询 <text class="soon">M3 上线</text></text><text class="arrow">›</text></view>
         <view class="menu-item" @tap="goOrders"><text>🛒 我的订单</text><text class="arrow">›</text></view>
         <view class="menu-item" @tap="goHelp"><text>💁‍♀️ 帮助与客服</text><text class="arrow">›</text></view>
         <view class="menu-item" @tap="goLegal('terms')"><text>📜 用户协议</text><text class="arrow">›</text></view>
         <view class="menu-item" @tap="goLegal('privacy')"><text>🔒 隐私政策</text><text class="arrow">›</text></view>
+        <view class="menu-item" @tap="goSettings"><text>⚙️ 设置</text><text class="arrow">›</text></view>
         <view class="menu-item logout" @tap="doLogout"><text>🚪 退出登录</text></view>
       </view>
     </template>
@@ -91,6 +92,20 @@ function goHelp() {
 }
 function goLegal(type: 'terms' | 'privacy') {
   uni.navigateTo({ url: `/pages/legal/${type}` })
+}
+function goSettings() {
+  if (!userStore.isLoggedIn) return
+  uni.navigateTo({ url: '/pages/me/settings' })
+}
+function goReport() {
+  if (!userStore.isLoggedIn) return
+  uni.navigateTo({ url: '/pages/report/index' })
+}
+function comingSoon(type: 'family' | 'expert') {
+  const msg = type === 'family'
+    ? '家人协作功能将在 M3 上线，敬请期待 💞'
+    : '营养师 1V1 咨询将在 M3 上线，敬请期待 👩‍⚕️'
+  uni.showModal({ title: '功能预告', content: msg, showCancel: false, confirmText: '知道了' })
 }
 
 const stageLabel = computed(() => {

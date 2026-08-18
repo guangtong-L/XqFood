@@ -63,6 +63,10 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { feedback as fb } from '../../utils/feedback'
+import { feedbackApi } from '../../api/feedback'
+import { useUserStore } from '../../store/user'
+
+const userStore = useUserStore()
 
 const feedback = ref('')
 const submitting = ref(false)
@@ -91,15 +95,38 @@ function goLegal(type: 'privacy' | 'terms') {
 }
 
 async function submitFeedback() {
-  if (!feedback.value.trim()) return
+  const content = feedback.value.trim()
+  if (!content) return
+  if (content.length < 5) {
+    fb.toast('反馈内容至少 5 个字')
+    return
+  }
+  if (!userStore.isLoggedIn) {
+    const ok = await fb.confirm('登录后可查看回复进度，是否前往登录？', '提示')
+    if (ok) uni.navigateTo({ url: '/pages/auth/wx-login' })
+    return
+  }
+
   submitting.value = true
   try {
-    // TODO M2 接入真实反馈接口，目前先存本地 + 提示
-    const list = uni.getStorageSync('local_feedback') || []
-    list.push({ content: feedback.value, time: new Date().toISOString() })
-    uni.setStorageSync('local_feedback', list)
-    fb.success('感谢您的反馈')
+    // 采集端环境信息（不带敏感数据）
+    const sysInfo = uni.getSystemInfoSync()
+    const clientInfo: Record<string, unknown> = {
+      platform: sysInfo.platform,
+      system: sysInfo.system,
+      model: sysInfo.model,
+      version: sysInfo.version,
+      appVersion: sysInfo.appVersion || '0.0.1'
+    }
+    await feedbackApi.submit({ content, category: 'general', clientInfo })
+    fb.success('已提交，工作日 30 分钟内回复')
     feedback.value = ''
+  } catch (e: unknown) {
+    // 网络/服务异常 → 本地兜底，下次启动可重发（后续可扩展）
+    const list = uni.getStorageSync('local_feedback_pending') || []
+    list.push({ content, time: new Date().toISOString() })
+    uni.setStorageSync('local_feedback_pending', list)
+    // 已被 request 工具 toast 过，这里不重复 toast
   } finally {
     submitting.value = false
   }
