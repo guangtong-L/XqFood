@@ -23,7 +23,7 @@
     "wot-design-uni": "1.14.0"
   },
   "devDependencies": {
-    "@dcloudio/types": "3.4.31",
+    "@dcloudio/types": "3.4.32",
     "@dcloudio/uni-app": "3.0.0-5020420260813003",
     "@dcloudio/uni-cli-shared": "3.0.0-5020420260813003",
     "@dcloudio/uni-components": "3.0.0-5020420260813003",
