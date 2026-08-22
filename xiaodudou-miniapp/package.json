@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "pinia": "2.2.4",
-    "vue": "3.4.21",
+    "vue": "3.5.41",
     "wot-design-uni": "1.14.0"
   },
   "devDependencies": {
