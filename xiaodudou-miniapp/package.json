@@ -18,7 +18,7 @@
     "generate:tabbar": "python scripts/generate-tabbar-icons.py"
   },
   "dependencies": {
-    "pinia": "2.2.4",
+    "pinia": "4.0.3",
     "vue": "3.4.21",
     "wot-design-uni": "1.14.0"
   },
