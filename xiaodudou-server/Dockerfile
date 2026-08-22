@@ -5,7 +5,7 @@ COPY pom.xml ./
 COPY src ./src
 RUN mvn -B -DskipTests clean package
 
-FROM eclipse-temurin:17-jre-jammy
+FROM eclipse-temurin:22-jre-jammy
 RUN groupadd --system --gid 10001 xdd \
     && useradd --system --uid 10001 --gid xdd --home-dir /app --shell /usr/sbin/nologin xdd
 WORKDIR /app
