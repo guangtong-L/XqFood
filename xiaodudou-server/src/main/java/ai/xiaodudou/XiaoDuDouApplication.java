@@ -16,13 +16,5 @@ public class XiaoDuDouApplication {
 
     public static void main(String[] args) {
         SpringApplication.run(XiaoDuDouApplication.class, args);
-        System.out.println("""
-
-                ╔════════════════════════════════════════╗
-                ║   小肚兜 AI 后端服务启动成功            ║
-                ║   API 文档:  http://localhost:8080/doc.html
-                ║   健康检查:  http://localhost:8080/api/v1/health
-                ╚════════════════════════════════════════╝
-                """);
     }
 }

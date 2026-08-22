@@ -11,7 +11,7 @@ export const useUserStore = defineStore('user', () => {
   async function loadMe() {
     try {
       const data = await userApi.me()
-      user.value = data.user
+      user.value = data
       profile.value = data.profile
       isLoggedIn.value = true
     } catch (e) {

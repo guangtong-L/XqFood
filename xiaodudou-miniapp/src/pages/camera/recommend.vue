@@ -1,5 +1,12 @@
 <template>
   <view class="page">
+    <view v-if="!AI_FEATURE_ENABLED" class="feature-closed">
+      <view class="empty-emoji">🍲</view>
+      <view class="empty-title">AI 推荐暂未开放</view>
+      <view class="empty-sub">内容安全审核能力仍在接入验收中，请先浏览现有菜谱。</view>
+      <button class="btn-retry" @tap="goRecipes">去浏览菜谱</button>
+    </view>
+    <template v-else>
     <!-- Loading -->
     <view v-if="loading" class="loading-area">
       <view class="loading-icon">🤖</view>
@@ -8,7 +15,7 @@
       <view class="progress-bar">
         <view class="progress-inner" :style="{ width: progress + '%' }"></view>
       </view>
-      <view class="loading-tip">通常 3-8 秒</view>
+      <view class="loading-tip">处理时间受网络与外部服务状态影响</view>
     </view>
 
     <!-- Empty -->
@@ -22,66 +29,58 @@
 
     <!-- Results -->
     <template v-else>
-      <view class="hint">💡 基于现有食材 + {{ stageDesc }}</view>
+      <view class="ai-label">{{ aiLabel }}</view>
+      <view class="hint">基于所填食材与上架菜谱的 AI 参考排序</view>
 
       <view v-if="isFallback" class="fallback-tip">
-        ⚠️ AI 服务繁忙，已切换至备用推荐
+        ⚠️ 当前为开发模式模拟结果，不代表真实 AI 推荐
       </view>
 
-      <view class="recipe-card" v-for="(r, idx) in recommendations" :key="r.recipeId" @tap="goDetail(r.recipeId)">
+      <view class="recipe-card" v-for="(r, idx) in recommendations" :key="r.recipe.id" @tap="goDetail(r.recipe.id)">
         <view class="rank">{{ ['🥇','🥈','🥉'][idx] || '🏅' }}</view>
         <view class="content">
           <view class="title">
-            {{ r.title }}
-            <text class="score">{{ r.matchScore }} 分</text>
+            {{ r.recipe.title }}
+            <text class="score">食材匹配参考 {{ r.matchScore }}</text>
           </view>
           <view class="reason">{{ r.reason }}</view>
           <view class="meta">
-            <text v-if="r.cookMinutes">🕐 {{ r.cookMinutes }} 分钟</text>
-            <text v-if="r.nutrition?.calories">🔥 {{ r.nutrition.calories }} kcal</text>
+            <text v-if="r.recipe.cookMinutes">🕐 {{ r.recipe.cookMinutes }} 分钟</text>
           </view>
           <view v-if="r.missingIngredients && r.missingIngredients.length" class="missing">
             缺料：{{ r.missingIngredients.map(m => m.name).join('、') }}
           </view>
-          <view v-else class="no-missing">✓ 食材齐全</view>
+          <view v-else class="no-missing">未列出缺料，请按做法再次核对</view>
           <view class="actions">
-            <text class="btn-link" @tap.stop="goDetail(r.recipeId)">查看做法 →</text>
-            <text class="btn-link" @tap.stop="addToToday(r.recipeId)">加入今日</text>
+            <text class="btn-link" @tap.stop="goDetail(r.recipe.id)">查看做法 →</text>
           </view>
         </view>
       </view>
 
-      <view class="disclaimer">⚠️ AI 推荐仅供参考，特殊体质遵医嘱</view>
+      <view class="allergy-notice">{{ allergyNotice }}</view>
+      <view class="disclaimer">{{ disclaimer }}</view>
+    </template>
     </template>
   </view>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onUnmounted } from 'vue'
+import { ref, onUnmounted } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { aiApi, type AiRecommendation } from '../../api/ai'
-import { checkinApi } from '../../api/checkin'
-import { useUserStore } from '../../store/user'
-import { feedback } from '../../utils/feedback'
+import { AI_FEATURE_ENABLED } from '../../config/features'
 
-const userStore = useUserStore()
 const recommendations = ref<AiRecommendation[]>([])
 const loading = ref(false)
 const loadingText = ref('调用 AI 中...')
 const progress = ref(0)
 const errorMsg = ref('')
 const isFallback = ref(false)
+const aiLabel = ref('AI辅助生成')
+const disclaimer = ref('AI 生成内容仅供参考，不构成医疗或营养建议，请人工核对食材与做法。')
+const allergyNotice = ref('仅基于现有标签降低冲突风险，仍需人工核对。')
 
 let progressTimer: ReturnType<typeof setInterval> | null = null
-
-const stageDesc = computed(() => {
-  const p = userStore.profile
-  if (!p) return '默认阶段'
-  if (p.stageType === 'POSTPARTUM') return `月子第 ${p.postpartumDay ?? '?'} 天`
-  if (p.stageType === 'WEANING') return '辅食期'
-  if (p.stageType === 'PREGNANCY') return `孕 ${p.pregnancyWeek ?? '?'} 周`
-  return p.stageType
-})
 
 function startProgress() {
   progress.value = 0
@@ -90,8 +89,8 @@ function startProgress() {
     if (progress.value < 90) {
       progress.value = Math.min(90, progress.value + (progress.value < 60 ? 6 : 2))
       if (progress.value < 25) loadingText.value = '准备食材清单...'
-      else if (progress.value < 55) loadingText.value = '调用 AI 营养师...'
-      else if (progress.value < 80) loadingText.value = '匹配 8 道候选菜谱...'
+      else if (progress.value < 55) loadingText.value = '调用 AI 服务...'
+      else if (progress.value < 80) loadingText.value = '核对上架候选菜谱...'
       else loadingText.value = '排序结果...'
     }
   }, 400)
@@ -110,17 +109,14 @@ async function loadRecommend() {
 
   try {
     const cached = uni.getStorageSync('recommend_input')
-    const params = cached || {
-      stage: userStore.profile || { stageType: 'POSTPARTUM', postpartumDay: 12 },
-      ingredients: [],
-      constraints: {},
-      count: 3
-    }
-    const data = await aiApi.recommend({ ...params, count: 3 })
+    if (!cached?.ingredients?.length) throw new Error('请返回上一步，至少添加一种食材')
+    const data = await aiApi.recommend(cached)
     recommendations.value = data.recommendations || []
 
-    // 通过 reason 判断是否是 mock 兜底（后端 mock 文案带"降级 Mock"）
-    isFallback.value = recommendations.value.some(r => r.reason?.includes('降级 Mock'))
+    isFallback.value = data.fallback
+    aiLabel.value = data.aiLabel || 'AI辅助生成'
+    disclaimer.value = data.disclaimer || disclaimer.value
+    allergyNotice.value = data.allergyNotice || allergyNotice.value
 
     if (recommendations.value.length === 0) {
       errorMsg.value = '没有匹配的菜谱，试试换种食材'
@@ -135,36 +131,30 @@ async function loadRecommend() {
 }
 
 onLoad(() => {
-  // 优先用缓存（拍照页直接传过来）
-  const cached = uni.getStorageSync('ai_recommendations')
-  if (cached && cached.length) {
-    recommendations.value = cached
-    isFallback.value = recommendations.value.some(r => r.reason?.includes('降级 Mock'))
-  } else {
-    // 缓存空就重新调
-    loadRecommend()
-  }
+  if (!AI_FEATURE_ENABLED) return
+  loadRecommend()
 })
 
 onUnmounted(() => {
   if (progressTimer) clearInterval(progressTimer)
 })
 
-function goDetail(id: string) {
+function goDetail(id: number) {
   uni.navigateTo({ url: `/pages/recipe/detail?id=${id}` })
 }
 function goBack() { uni.navigateBack() }
+function goRecipes() { uni.switchTab({ url: '/pages/recipe/list' }) }
 
-async function addToToday(id: string) {
-  try {
-    await checkinApi.checkin(id)
-    feedback.success('已加入今日')
-  } catch (e) { console.error(e) }
-}
 </script>
 
 <style lang="scss" scoped>
 .page { padding: 32rpx; background: #F7F7F7; min-height: 100vh; }
+.feature-closed { padding: 160rpx 32rpx; text-align: center;
+  .empty-emoji { font-size: 112rpx; }
+  .empty-title { margin-top: 24rpx; font-size: 32rpx; font-weight: 600; }
+  .empty-sub { margin-top: 16rpx; color: #777; font-size: 26rpx; line-height: 1.6; }
+  .btn-retry { margin-top: 42rpx; min-height: 88rpx; border-radius: 44rpx; background: #FF8866; color: #fff; }
+}
 
 .loading-area { padding: 200rpx 32rpx; text-align: center;
   .loading-icon { font-size: 96rpx; animation: bob 1.5s ease-in-out infinite; }
@@ -186,11 +176,13 @@ async function addToToday(id: string) {
 }
 
 .hint { text-align: center; color: #FF8866; margin-bottom: 24rpx; font-size: 28rpx; }
+.ai-label { width: fit-content; margin: 0 auto 16rpx; padding: 8rpx 16rpx; border-radius: 8rpx; background: #FFF0EB; color: #D94F2B; font-size: 22rpx; }
 .fallback-tip {
   background: #FFF4E5; color: #B57100;
   padding: 16rpx 24rpx; border-radius: 12rpx;
   font-size: 24rpx; margin-bottom: 16rpx;
 }
+.allergy-notice { margin-top: 24rpx; padding: 20rpx; border-radius: 12rpx; background: #FFF7E8; color: #7A5600; font-size: 23rpx; line-height: 1.6; }
 
 .recipe-card { display: flex; background: #fff; border-radius: 24rpx; padding: 32rpx 24rpx; margin-bottom: 24rpx;
   .rank { font-size: 56rpx; margin-right: 24rpx; }

@@ -2,7 +2,7 @@
   <view class="page">
     <view v-if="!userStore.isLoggedIn" class="not-login">
       <view class="emoji">👋</view>
-      <view class="text">登录后享受 AI 个性化推荐</view>
+      <view class="text">登录后可保存收藏和已食用记录</view>
       <button class="btn-login" @tap="goLogin">立即登录</button>
     </view>
 
@@ -14,14 +14,6 @@
         <view class="stage" @tap="goSetup">{{ stageLabel }} ›</view>
       </view>
 
-      <view class="vip-card" @tap="goVip">
-        <view class="vip-info">
-          <view class="vip-title">{{ vipTitle }}</view>
-          <view class="vip-sub">{{ vipSub }}</view>
-        </view>
-        <button class="btn-renew" @tap.stop="goVip">{{ userStore.user?.vipLevel ? '续费' : '开通' }}</button>
-      </view>
-
       <view class="menu">
         <view class="menu-item" @tap="goSetup"><text>📋 我的档案</text><text class="arrow">›</text></view>
         <view class="menu-item" @tap="goFavorites">
@@ -29,10 +21,6 @@
           <text class="arrow">{{ favCount > 0 ? favCount : '' }} ›</text>
         </view>
         <view class="menu-item" @tap="goCheckin"><text>📅 打卡日历</text><text class="arrow">›</text></view>
-        <view class="menu-item" @tap="goReport"><text>📊 营养报告</text><text class="arrow">›</text></view>
-        <view class="menu-item" @tap="comingSoon('family')"><text>👨‍👩‍👧 家人协作 <text class="soon">M3 上线</text></text><text class="arrow">›</text></view>
-        <view class="menu-item" @tap="comingSoon('expert')"><text>💬 营养师咨询 <text class="soon">M3 上线</text></text><text class="arrow">›</text></view>
-        <view class="menu-item" @tap="goOrders"><text>🛒 我的订单</text><text class="arrow">›</text></view>
         <view class="menu-item" @tap="goHelp"><text>💁‍♀️ 帮助与客服</text><text class="arrow">›</text></view>
         <view class="menu-item" @tap="goLegal('terms')"><text>📜 用户协议</text><text class="arrow">›</text></view>
         <view class="menu-item" @tap="goLegal('privacy')"><text>🔒 隐私政策</text><text class="arrow">›</text></view>
@@ -56,8 +44,8 @@ const favCount = ref(0)
 async function loadFavCount() {
   if (!userStore.isLoggedIn) { favCount.value = 0; return }
   try {
-    const list = await favoriteApi.myList()
-    favCount.value = list?.length || 0
+    const page = await favoriteApi.myList(1, 1)
+    favCount.value = page.total || 0
   } catch { favCount.value = 0 }
 }
 
@@ -76,17 +64,6 @@ function goCheckin() {
   if (!userStore.isLoggedIn) return
   uni.navigateTo({ url: '/pages/me/checkin' })
 }
-function goVip() {
-  if (!userStore.isLoggedIn) {
-    uni.navigateTo({ url: '/pages/auth/wx-login' })
-    return
-  }
-  uni.navigateTo({ url: '/pages/vip/center' })
-}
-function goOrders() {
-  if (!userStore.isLoggedIn) return
-  uni.navigateTo({ url: '/pages/order/list' })
-}
 function goHelp() {
   uni.navigateTo({ url: '/pages/help/index' })
 }
@@ -97,17 +74,6 @@ function goSettings() {
   if (!userStore.isLoggedIn) return
   uni.navigateTo({ url: '/pages/me/settings' })
 }
-function goReport() {
-  if (!userStore.isLoggedIn) return
-  uni.navigateTo({ url: '/pages/report/index' })
-}
-function comingSoon(type: 'family' | 'expert') {
-  const msg = type === 'family'
-    ? '家人协作功能将在 M3 上线，敬请期待 💞'
-    : '营养师 1V1 咨询将在 M3 上线，敬请期待 👩‍⚕️'
-  uni.showModal({ title: '功能预告', content: msg, showCancel: false, confirmText: '知道了' })
-}
-
 const stageLabel = computed(() => {
   const p = userStore.profile
   if (!p) return '点击完善阶段画像'
@@ -117,20 +83,6 @@ const stageLabel = computed(() => {
   if (p.stageType === 'WEANING') return '🍼 辅食期'
   if (p.stageType === 'CHILD') return '🧒 儿童餐'
   return '阶段未设置'
-})
-
-const vipTitle = computed(() => {
-  const lv = userStore.user?.vipLevel ?? 0
-  if (lv === 0) return '💎 开通会员，解锁全部 AI 能力'
-  if (lv === 1) return '💎 月子精养卡'
-  if (lv === 2) return '💎 辅食年卡'
-  if (lv === 3) return '💎 儿童年卡'
-  return '💎 会员中'
-})
-
-const vipSub = computed(() => {
-  const lv = userStore.user?.vipLevel ?? 0
-  return lv === 0 ? '每天 3 次免费 AI 推荐' : '无限 AI 推荐 + 专家咨询次数'
 })
 
 function goLogin() {

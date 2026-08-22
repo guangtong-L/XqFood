@@ -4,17 +4,12 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * 各阶段每日营养推荐量
- * 数据依据：中国营养学会《中国居民膳食营养素参考摄入量》(DRIs 2023)
+ * 历史阶段目标占位模型，未经适用人群、年龄与专业口径验收。
  *
- * 单位：
- *   calories  kcal
- *   protein   g
- *   calcium   mg
- *   iron      mg
- *   vitA      μg
- *   vitC      mg
+ * <p>生产接口不得引用本类，也不得据此生成达标率、缺口或健康建议。
+ * 保留代码仅用于兼容历史版本，待数据口径正式验收后再决定替换或删除。</p>
  */
+@Deprecated(forRemoval = true)
 public class NutritionTarget {
 
     public static Map<String, Number> forStage(String stageType) {

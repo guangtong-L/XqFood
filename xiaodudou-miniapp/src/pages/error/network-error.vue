@@ -21,14 +21,15 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { feedback as fb } from '../../utils/feedback'
+import { API_BASE_URL } from '../../utils/request'
 
 const retrying = ref(false)
 
 async function retry() {
   retrying.value = true
-  // 简单探活：调用 health
+  // 就绪探测同时验证数据库和 Redis，不能用仅代表进程存活的 liveness。
   try {
-    const res = await uni.request({ url: 'http://localhost:8080/api/v1/health', timeout: 5000 })
+    const res = await uni.request({ url: API_BASE_URL + '/api/v1/readiness', timeout: 5000 })
     if (res.statusCode === 200) {
       fb.success('网络已恢复')
       setTimeout(() => uni.navigateBack(), 600)

@@ -2,35 +2,8 @@
   <view class="page">
     <view class="hero">
       <view class="emoji">💁‍♀️</view>
-      <view class="title">在线客服</view>
-      <view class="sub">工作日 9:00-21:00，30 分钟内响应</view>
-    </view>
-
-    <view class="contact-card">
-      <view class="contact-row" @tap="copy('contact@xiaodudou.ai')">
-        <text class="icon">📧</text>
-        <view class="info">
-          <view class="label">客服邮箱</view>
-          <view class="value">contact@xiaodudou.ai</view>
-        </view>
-        <text class="action">复制</text>
-      </view>
-      <view class="contact-row" @tap="copy('xddai_service')">
-        <text class="icon">💬</text>
-        <view class="info">
-          <view class="label">企业微信客服</view>
-          <view class="value">xddai_service</view>
-        </view>
-        <text class="action">复制</text>
-      </view>
-      <view class="contact-row" @tap="copy('400-XXX-XXXX')">
-        <text class="icon">📞</text>
-        <view class="info">
-          <view class="label">客服热线</view>
-          <view class="value">400-XXX-XXXX</view>
-        </view>
-        <text class="action">复制</text>
-      </view>
+      <view class="title">帮助与反馈</view>
+      <view class="sub">可在下方提交使用问题或改进建议</view>
     </view>
 
     <view class="section">
@@ -72,23 +45,15 @@ const feedback = ref('')
 const submitting = ref(false)
 
 const faqs = ref([
-  { q: 'AI 识别不准确怎么办？', a: '可以点击识别结果页的 + 手动添加，或者长按食材删除。我们也建议把冰箱内食材尽量平铺，避免重叠和反光。', open: false },
-  { q: '今日免费额度用完了？', a: '免费用户每日 5 次 AI 调用。开通月子卡（599元）即可享 50 次/日 + 营养师咨询权益。', open: false },
-  { q: '过敏源会被严格过滤吗？', a: '是的。我们在召回和 AI 推荐两个环节都做硬规则过滤，含过敏源食材的菜谱不会出现在推荐中。但您仍需在食用前自行确认。', open: false },
+  { q: 'AI 识别与推荐现在可以使用吗？', a: '暂未开放。真实内容安全审核能力完成接入和验收前，生产环境不会提供 AI 识别与推荐；菜谱浏览、收藏和记录功能不受影响。', open: false },
+  { q: '会员或额度可以购买吗？', a: '暂不可以。会员购买、支付和额度升级均未开放。', open: false },
+  { q: '过敏标签能保证安全吗？', a: '不能。系统仅基于现有食材标签降低已知冲突风险，标签可能不完整，食用前仍需结合配料、包装和个人情况人工核对。', open: false },
   { q: '可以修改阶段画像吗？', a: '可以。在"我的-档案"中随时修改孕周、产后天数、过敏源等信息。', open: false },
-  { q: '会员可以退款吗？', a: '首次购买可在 7 天内未使用任何付费功能的前提下申请全额退款。已大量使用付费功能后原则上不退款。', open: false },
-  { q: '妈妈圈能看到我的真实昵称吗？', a: '不会。我们对所有妈妈圈展示的昵称做脱敏处理（如"B**"），并且您看不到自己的打卡，避免泄露身份。', open: false },
-  { q: '如何注销账号？', a: '"我的-设置-注销账号"。提交后 30 天内我们会删除您的全部数据（依法律要求的部分日志保留 180 天）。', open: false }
+  { q: '妈妈圈会展示我的资料吗？', a: '不会。妈妈圈当前未开放，也不会请求或展示用户头像、孕周、产后天数或打卡动态。', open: false },
+  { q: '如何注销账号？', a: '请前往“我的-设置-永久注销账号”，阅读删除与财务记录保留规则后完成二次确认。', open: false }
 ])
 
 function toggle(idx: number) { faqs.value[idx].open = !faqs.value[idx].open }
-
-function copy(text: string) {
-  uni.setClipboardData({
-    data: text,
-    success: () => fb.success('已复制')
-  })
-}
 
 function goLegal(type: 'privacy' | 'terms') {
   uni.navigateTo({ url: `/pages/legal/${type}` })
@@ -119,7 +84,7 @@ async function submitFeedback() {
       appVersion: sysInfo.appVersion || '0.0.1'
     }
     await feedbackApi.submit({ content, category: 'general', clientInfo })
-    fb.success('已提交，工作日 30 分钟内回复')
+    fb.success('反馈已提交')
     feedback.value = ''
   } catch (e: unknown) {
     // 网络/服务异常 → 本地兜底，下次启动可重发（后续可扩展）

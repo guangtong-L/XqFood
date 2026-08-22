@@ -16,12 +16,10 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.PostConstruct;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.env.Environment;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -33,16 +31,10 @@ import java.util.*;
 /**
  * 订单 + 会员
  *
- * ⚠️ 当前为 Mock 支付模式（wechatPay.enabled=false）：
- *    - 创建订单 → 自动模拟支付成功 → 写 VIP
- * 真实模式（M2 等微信商户号下来后实现）：
- *    - 创建订单 → 返回 jsapi 参数 → 用户调起支付 → 微信回调 notify_url → 写 VIP
+ * 当前商业化、支付与退款均默认关闭。历史订单只读逻辑保留；在真实支付、验签回调与
+ * 退款能力完成前，所有资金相关写接口均由服务端闸门拒绝。
  *
- * Phase A 加固（2026-05-25）：
- *  A1 启动断言：prod profile + wechatPay.enabled=false 时直接拒启
- *  A4 创建订单 Redis 分布式锁（5s）防双击/并发
- *  A5 paySuccess / refund 用 CAS 防重复处理
- *  A3 退款不再清零 vip_level，按剩余 PAID 订单重算
+ * 历史实现仍保留订单防重、CAS 状态更新及 VIP 重算逻辑，便于未来完成真实支付后复核复用。
  */
 @Slf4j
 @Tag(name = "08 - 订单与会员")
@@ -54,7 +46,9 @@ public class OrderController {
     private final OrderMapper orderMapper;
     private final UserMapper userMapper;
     private final StringRedisTemplate redis;
-    private final Environment env;
+
+    @Value("${xiaodudou.commercial.enabled:false}")
+    private boolean commercialEnabled;
 
     @Value("${xiaodudou.wechat.pay.enabled:false}")
     private boolean wechatPayEnabled;
@@ -64,24 +58,12 @@ public class OrderController {
 
     private static final Duration CREATE_LOCK_TTL = Duration.ofSeconds(5);
 
-    /**
-     * A1: 启动断言 —— 生产环境禁止 Mock 支付
-     * Mock 模式调一次 POST /orders 就写 VIP，prod 漏配 = 全站白嫖
-     */
-    @PostConstruct
-    public void validateConfig() {
-        boolean isProd = Arrays.asList(env.getActiveProfiles()).contains("prod");
-        if (isProd && !wechatPayEnabled) {
-            throw new IllegalStateException(
-                    "[Order] 生产环境必须启用真实微信支付：xiaodudou.wechat.pay.enabled=true（当前 Mock 模式禁止上 prod）");
-        }
-    }
-
     // ============ 套餐列表 ============
     @SaIgnore
     @GetMapping("/packages")
     @Operation(summary = "套餐列表（公开）")
     public Result<List<Map<String, Object>>> packages() {
+        assertCommercialEnabled();
         List<Map<String, Object>> list = new ArrayList<>();
         for (VipPackage p : VipPackage.all()) {
             Map<String, Object> m = new LinkedHashMap<>();
@@ -104,9 +86,10 @@ public class OrderController {
     }
 
     @PostMapping("/orders")
-    @Operation(summary = "创建订单（返回支付参数或 mock 成功）")
+    @Operation(summary = "创建订单（当前由商业化闸门关闭）")
     @Transactional(rollbackFor = Exception.class)
     public Result<Map<String, Object>> create(@RequestBody CreateOrderReq req) {
+        assertPaymentWriteAvailable();
         Long userId = StpUtil.getLoginIdAsLong();
         VipPackage pkg = VipPackage.of(req.getPackageCode());
         if (pkg == null) {
@@ -151,18 +134,12 @@ public class OrderController {
                 order.getOutTradeNo(), userId, pkg.getCode(), pkg.getAmountFen());
 
         // 3. 支付模式分支
-        if (!wechatPayEnabled) {
-            // Mock 模式：立即模拟支付成功
-            paySuccess(order, "mock", "MOCK_" + System.currentTimeMillis());
-            return Result.ok(buildPayResponse(order));
-        }
-
-        // TODO 真实模式：调微信支付下单接口（M2 等商户号）
-        throw new BusinessException(ResultCode.SERVER_ERROR, "真实微信支付待 M2 实现（需要商户号）");
+        // 防御性兜底：当前版本没有真实支付实现，事务会回滚，绝不生成 PAID 订单。
+        throw new BusinessException(ResultCode.FEATURE_NOT_AVAILABLE, "支付功能暂未开放");
     }
 
     /**
-     * Mock 支付成功（仅 Mock 模式）
+     * 历史支付成功状态处理逻辑（当前没有任何公开入口调用）
      * A5: 用 CAS 写订单（PENDING → PAID），并发/重复调用时幂等返回
      * A3: 通过 recalcUserVip 重算 VIP（不再就地累加）
      */
@@ -261,16 +238,17 @@ public class OrderController {
         return Result.ok(order);
     }
 
-    // ============ 退款（M1 简化：仅记录意向，真实退款 M2） ============
+    // ============ 历史退款逻辑（当前由服务端闸门关闭） ============
     @Data
     public static class RefundReq {
         private String reason;
     }
 
     @PostMapping("/orders/{id}/refund")
-    @Operation(summary = "申请退款（首次购买 7 天内未使用付费功能）")
+    @Operation(summary = "申请退款（当前未开放）")
     @Transactional(rollbackFor = Exception.class)
     public Result<Void> refund(@PathVariable Long id, @RequestBody RefundReq req) {
+        assertRefundWriteAvailable();
         Long userId = StpUtil.getLoginIdAsLong();
         Order order = orderMapper.selectById(id);
         if (order == null || !order.getUserId().equals(userId)) {
@@ -299,5 +277,26 @@ public class OrderController {
         log.info("[Order] 退款成功 outTradeNo={} userId={} reason={}",
                 order.getOutTradeNo(), userId, req.getReason());
         return Result.ok();
+    }
+
+    private void assertCommercialEnabled() {
+        if (!commercialEnabled) {
+            throw new BusinessException(ResultCode.FEATURE_NOT_AVAILABLE, "会员与订单功能暂未开放");
+        }
+    }
+
+    private void assertPaymentWriteAvailable() {
+        assertCommercialEnabled();
+        if (!wechatPayEnabled) {
+            throw new BusinessException(ResultCode.FEATURE_NOT_AVAILABLE, "支付功能暂未开放");
+        }
+        // 真实微信支付接口、签名验签和回调处理尚未实现，禁止仅靠配置误开启。
+        throw new BusinessException(ResultCode.FEATURE_NOT_AVAILABLE, "真实支付能力尚未完成，禁止创建订单");
+    }
+
+    private void assertRefundWriteAvailable() {
+        assertCommercialEnabled();
+        // 真实退款 API、异步通知及资金状态核对尚未实现，禁止把申请直接记为退款成功。
+        throw new BusinessException(ResultCode.FEATURE_NOT_AVAILABLE, "真实退款能力尚未完成，请勿提交退款");
     }
 }

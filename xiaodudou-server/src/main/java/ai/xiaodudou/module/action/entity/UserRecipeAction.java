@@ -9,6 +9,8 @@ import lombok.Data;
 
 import java.io.Serializable;
 import java.time.LocalDateTime;
+import java.time.LocalDate;
+import java.math.BigDecimal;
 
 /**
  * 用户食谱行为：收藏 / 打卡 / 分享
@@ -25,6 +27,10 @@ public class UserRecipeAction implements Serializable {
 
     /** favorite / cook / share */
     private String action;
+    private LocalDate actionDate;
+    private String mealType;
+    private BigDecimal servings;
+    private String idempotencyKey;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

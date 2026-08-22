@@ -22,12 +22,20 @@ export interface Ingredient {
 export interface RecipeDetail {
   recipe: Recipe
   ingredients: Ingredient[]
-  recipeIngredients: Array<{ ingredientId: string; quantity: string; isOptional: number }>
+  recipeIngredients: Array<{ ingredientId: string; quantity: string; optional: boolean }>
+}
+
+export interface PageResponse<T> {
+  records: T[]
+  total: number
+  page: number
+  size: number
+  pages: number
 }
 
 export const recipeApi = {
   list(params?: { stageTag?: string; keyword?: string; page?: number; size?: number }) {
-    return http.get<{ records: Recipe[]; total: number }>('/api/v1/recipes', params as Record<string, unknown>)
+    return http.get<PageResponse<Recipe>>('/api/v1/recipes', params as Record<string, unknown>)
   },
   detail(id: string | number) {
     return http.get<RecipeDetail>(`/api/v1/recipes/${id}`)

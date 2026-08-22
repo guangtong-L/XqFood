@@ -1,19 +1,19 @@
 # 小肚兜 AI
 
-> 中国版「母婴营养版 Notion」—— 用 AI 帮中国妈妈解决「今天给宝宝/产妇做什么」
+> 母婴阶段菜谱浏览、收藏与饮食记录工具；AI 能力尚未达到生产开放条件。
 
 ## 项目状态
 
-- 🚀 当前阶段：**M1 开发期**（4 周 / 63 人日）
+- 🚧 当前阶段：**上线可靠性加固，生产外部前置检查仍未通过**
 - 📅 启动日期：2026-05-23
-- 🎯 M1 目标：AI 拍食材出菜谱 + 月子阶段画像 + 100 种子用户内测
+- 🎯 当前可用主链路：菜谱浏览、收藏、打卡和账号注销
 
 ## 技术栈
 
 ### 后端 (xiaodudou-server)
-- Java 17 + Spring Boot 3.2.x
-- MyBatis-Plus 3.5 + MySQL 8 + Redis 7
-- Sa-Token 鉴权 + Knife4j API 文档
+- Java 17 + Spring Boot 3.5.16
+- MyBatis-Plus 3.5.17 + MySQL 8 + Redis 7
+- Sa-Token 1.46.0 鉴权 + springdoc（仅非生产环境）
 - Flyway DB 迁移 + Hutool + Lombok
 
 ### 前端 (xiaodudou-miniapp)
@@ -23,9 +23,9 @@
 - Vite 构建
 
 ### AI 服务
-- 智谱 GLM-4V（食材识别 + 菜谱推荐）
-- 通义千问（兜底）
-- 腾讯云内容安全（输出审核）
+- 生产环境由后端安全闸门强制关闭，当前不可作为上线能力。
+- 开发环境可显式开启真实或带明确标识的 Mock 进行测试。
+- 恢复生产 AI 前必须完成真实内容安全审核供应商接入与专项验收。
 
 ## 目录结构
 
@@ -40,7 +40,7 @@ xiaodudou/
 
 ## 文档索引
 
-> 完整设计文档位于 `D:\code\xiaodudou-ai-docs\`（独立目录，避免污染代码仓）
+> 设计与历史规划文档位于仓库 `docs/xiaodudou-ai-docs/`。标记为历史草案的内容不代表已交付能力。
 
 | 文档 | 内容 |
 |---|---|
@@ -56,8 +56,8 @@ xiaodudou/
 ```bash
 cd xiaodudou-server
 # 准备 MySQL（创建数据库 xiaodudou）和 Redis
-# 修改 src/main/resources/application-dev.yml 中的数据库密码
-mvn spring-boot:run
+# 通过环境变量或本地忽略配置注入 DB_PASSWORD、REDIS_PASSWORD 等凭据
+mvn spring-boot:run -Dspring-boot.run.profiles=dev
 # 访问 http://localhost:8080/doc.html 看 API 文档
 ```
 
@@ -82,17 +82,23 @@ npm install
 
 ## 关键风险与合规清单
 
-- [ ] **AI 服务备案**（生成式 AI + 算法备案）—— 30-45 天，**今天启动**
-- [ ] **ICP 备案** —— 20 天
-- [ ] **微信小程序类目**（母婴 + 餐饮，需营业执照）
-- [ ] **食品经营许可证**（涉及"营养建议"可能需要）
-- [ ] **个人信息保护法合规**（健康数据加密 + 最小化采集）
-- [ ] **内容审核接入**（腾讯云内容安全）
-- [ ] **AI 调用日志留存**（≥ 180 天）
+- [ ] 由法务确认适用的 AI、算法、备案、类目及个人信息保护要求
+- [ ] 确认真实运营主体、有效联系方式和平台审核材料
+- [ ] 敏感画像加密已实现；密钥托管/轮换、加密灾备、恢复演练、最小权限和访问审计仍需生产验收。生产密钥丢失会导致对应画像永久不可解密，禁止临时重生成替代。
+- [ ] 内容安全审核接入并完成失败降级、拦截测试
+- [ ] AI 日志最小化和自动清理已实现；保留周期仍需法务确认并完成生产配置与审计验收
+- [ ] 真实微信 AppID、合法域名、登录和图片上传真机验收
 
-## 团队联系
+## 上线安全检查
 
-- 创始人：TBD
-- 产品负责人：TBD
-- 技术负责人：TBD
-- 营养师顾问：招募中
+```powershell
+# 扫描 Git 跟踪及待提交文本文件，不输出命中的敏感内容
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\repository-safety-check.ps1
+
+# 验证凭据泄漏与虚假加密承诺两类规则本身有效
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\repository-safety-check.ps1 -SelfTest
+```
+
+## 项目责任人
+
+真实责任人和有效联系方式尚未在仓库确认，正式上线前必须补齐，不在文档中编造。

@@ -28,7 +28,7 @@
         <text class="label">接收营销消息</text>
         <switch :checked="notifyMarketing" color="#FF8866" @change="onToggleMarketing" />
       </view>
-      <view class="row-hint">关闭推送后，仅会员到期、客服回复等重要通知会发送</view>
+      <view class="row-hint">通知能力以微信及系统实际授权状态为准</view>
     </view>
 
     <!-- 缓存管理 -->
@@ -38,7 +38,7 @@
         <text class="label">清除缓存</text>
         <text class="value">{{ cacheSize }} ›</text>
       </view>
-      <view class="row-hint">不会删除您的收藏、打卡和订单</view>
+      <view class="row-hint">只清理本机缓存，不删除服务端收藏和打卡记录</view>
     </view>
 
     <!-- 关于 -->
@@ -56,20 +56,16 @@
         <text class="label">隐私政策</text>
         <text class="value">›</text>
       </view>
-      <view class="row" @tap="copyText('contact@xiaodudou.ai')">
-        <text class="label">联系我们</text>
-        <text class="value muted">contact@xiaodudou.ai ›</text>
-      </view>
     </view>
 
     <!-- 账号操作 -->
     <view class="card">
       <view class="card-title">账号操作</view>
-      <view class="row danger" @tap="doDeactivate">
-        <text class="label">注销账号</text>
+      <view class="row danger" @tap="deleteAccount">
+        <text class="label">永久注销账号</text>
         <text class="value">›</text>
       </view>
-      <view class="row-hint danger-hint">注销后 30 天内可联系客服恢复，30 天后数据将被永久删除</view>
+      <view class="row-hint danger-hint">注销后个人画像、收藏、打卡、反馈及 AI 日志将删除；依法需保留的已支付/已退款财务记录会保留，但账号信息将匿名化。</view>
     </view>
 
     <!-- 退出登录 -->
@@ -84,11 +80,13 @@ import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useUserStore } from '../../store/user'
 import { authApi } from '../../api/auth'
+import { userApi } from '../../api/user'
 import { feedback as fb } from '../../utils/feedback'
 
 const userStore = useUserStore()
 const appVersion = ref('0.0.1')
 const cacheSize = ref('0 KB')
+const deleting = ref(false)
 
 // 通知开关（仅本地）
 const notifyPush = ref(uni.getStorageSync('notify_push') !== false)
@@ -186,10 +184,6 @@ function checkUpdate() {
   fb.success('已是最新版本')
 }
 
-function copyText(text: string) {
-  uni.setClipboardData({ data: text, success: () => fb.success('已复制') })
-}
-
 function goProfile() {
   uni.navigateTo({ url: '/pages/profile/setup' })
 }
@@ -198,26 +192,41 @@ function goLegal(type: 'terms' | 'privacy') {
   uni.navigateTo({ url: `/pages/legal/${type}` })
 }
 
-async function doDeactivate() {
-  const ok = await fb.confirm(
-    '注销后您的全部数据将进入 30 天删除冷静期，期间可联系客服恢复。是否继续？',
-    '注销账号'
-  )
-  if (!ok) return
-  // M2 接入真实注销接口；当前先记录意向 + 提示联系客服
-  try {
-    // 复用反馈通道做注销意向记录
-    const { feedbackApi } = await import('../../api/feedback')
-    await feedbackApi.submit({
-      content: '【注销账号】用户主动申请注销',
-      category: 'business'
+async function askDeletionPhrase() {
+  return new Promise<string>((resolve) => {
+    uni.showModal({
+      title: '输入确认语句',
+      content: '请输入“确认注销账号”以继续。此操作不可撤销。',
+      editable: true,
+      placeholderText: '确认注销账号',
+      confirmText: '永久注销',
+      confirmColor: '#D83A2E',
+      success: (res) => resolve(res.confirm ? (res.content || '').trim() : ''),
+      fail: () => resolve('')
     })
-  } catch { /* 失败也不阻塞下面提示 */ }
-  uni.showModal({
-    title: '已收到注销申请',
-    content: '客服将在 1 个工作日内联系您完成注销。如紧急请直接拨打 400-XXX-XXXX。',
-    showCancel: false
   })
+}
+
+async function deleteAccount() {
+  if (deleting.value) return
+  const first = await fb.confirm(
+    '注销会立即删除个人画像、收藏、打卡、反馈和 AI 日志，并匿名化账号。已支付或已退款财务记录依法保留。确认继续？',
+    '永久注销账号'
+  )
+  if (!first) return
+  const phrase = await askDeletionPhrase()
+  if (!phrase) return
+  if (phrase !== '确认注销账号') { fb.error('确认语句不正确'); return }
+
+  deleting.value = true
+  try {
+    await userApi.deleteMe(phrase)
+    try { uni.clearStorageSync() } catch { /* 继续清理内存态 */ }
+    userStore.logout()
+    uni.showToast({ title: '账号已注销', icon: 'success' })
+    setTimeout(() => uni.reLaunch({ url: '/pages/auth/wx-login' }), 500)
+  } catch { /* 请求层已展示服务端错误 */ }
+  finally { deleting.value = false }
 }
 
 async function doLogout() {

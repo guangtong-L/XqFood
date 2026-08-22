@@ -1,31 +1,108 @@
 spring:
   application:
     name: xiaodudou-server
-  profiles:
-    # local 覆盖 dev 的占位 key（local 已 gitignore）
-    active: dev,local
+  # 不默认激活任何环境。开发/生产必须由部署参数显式指定 profile，避免误带开发配置上线。
+  datasource:
+    url: ${DB_URL:}
+    username: ${DB_USERNAME:}
+    password: ${DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:10}
+      minimum-idle: ${DB_POOL_MIN_IDLE:2}
+      connection-timeout: ${DB_CONNECTION_TIMEOUT_MS:3000}
+      validation-timeout: ${DB_VALIDATION_TIMEOUT_MS:2000}
+      idle-timeout: ${DB_IDLE_TIMEOUT_MS:600000}
+      max-lifetime: ${DB_MAX_LIFETIME_MS:1500000}
+  data:
+    redis:
+      host: ${REDIS_HOST:}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      connect-timeout: ${REDIS_CONNECT_TIMEOUT:3s}
+      timeout: ${REDIS_COMMAND_TIMEOUT:3s}
+      lettuce:
+        shutdown-timeout: 200ms
+        pool:
+          max-active: ${REDIS_POOL_MAX_ACTIVE:16}
+          max-idle: ${REDIS_POOL_MAX_IDLE:8}
+          min-idle: ${REDIS_POOL_MIN_IDLE:1}
+          max-wait: ${REDIS_POOL_MAX_WAIT:2s}
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
-    time-zone: GMT+8
+    time-zone: Asia/Shanghai
     default-property-inclusion: non_null
   servlet:
     multipart:
       enabled: true
-      max-file-size: 8MB
-      max-request-size: 10MB
+      max-file-size: 5MB
+      max-request-size: 6MB
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+  mvc:
+    async:
+      request-timeout: 30s
 
 server:
   port: 8080
+  shutdown: graceful
+  max-http-request-header-size: 16KB
+  forward-headers-strategy: none
   servlet:
     context-path: /
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
   tomcat:
-    max-http-form-post-size: 10MB
+    uri-encoding: UTF-8
+    connection-timeout: 10s
+    keep-alive-timeout: 20s
+    max-connections: 2000
+    accept-count: 200
+    max-http-form-post-size: 6MB
+    max-swallow-size: 6MB
+
+management:
+  server:
+    port: ${MANAGEMENT_SERVER_PORT:8081}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+      group:
+        liveness:
+          include: livenessState
+        readiness:
+          include: readinessState,infrastructureReadiness
+  info:
+    env:
+      enabled: false
+
+springdoc:
+  api-docs:
+    enabled: ${OPENAPI_ENABLED:false}
+  swagger-ui:
+    enabled: ${OPENAPI_ENABLED:false}
+
+logging:
+  level:
+    # 防止 SQL 参数日志回显 openid、密文或历史画像字段。
+    ai.xiaodudou.module.user.mapper: INFO
+    # 基础设施故障由 readiness 记录错误类型；禁止 Lettuce 重连堆栈泄露内部拓扑。
+    io.lettuce.core.protocol.ConnectionWatchdog: OFF
+    io.lettuce.core.protocol.ReconnectionHandler: OFF
 
 # MyBatis-Plus
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    # 生产默认不输出 SQL 参数/结果，避免历史画像迁移时把明文写入日志。
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
   global-config:
     db-config:
       id-type: ASSIGN_ID
@@ -37,27 +114,53 @@ mybatis-plus:
 # Sa-Token 鉴权
 sa-token:
   token-name: x-token
-  timeout: 2592000              # 30 天
-  active-timeout: -1
+  timeout: ${SA_TOKEN_TIMEOUT_SECONDS:604800}          # 最长 7 天
+  active-timeout: ${SA_TOKEN_ACTIVE_TIMEOUT_SECONDS:43200} # 连续 12 小时无操作失效
   is-concurrent: true
   is-share: false
   token-style: uuid
   is-log: false
 
-# Knife4j
-knife4j:
-  enable: true
-  setting:
-    language: zh_cn
-    enable-version: true
-  openapi:
-    title: 小肚兜 AI - API 文档
-    description: 母婴营养小程序后端接口
-    version: v0.1
-    concat: contact@xiaodudou.ai
-    group:
-      default:
-        group-name: 默认分组
-        api-rule: package
-        api-rule-resources:
-          - ai.xiaodudou
+# 安全默认值：所有 Mock、商业化及第三方能力均默认关闭。
+xiaodudou:
+  mock:
+    login-enabled: false
+    ai-enabled: false
+  commercial:
+    enabled: false
+  features:
+    # AI 在真实内容安全审核供应商完成接入和验收前保持关闭。
+    ai-enabled: false
+    # 妈妈圈缺少用户发布/展示同意机制，默认和生产均关闭。
+    community-enabled: false
+    # 目标百分比/N日营养报告缺少经验证的数据基础，默认关闭。
+    nutrition-report-enabled: false
+  security:
+    data-encryption-key: ${XDD_DATA_ENCRYPTION_KEY:}
+    data-encryption-key-version: ${XDD_DATA_ENCRYPTION_KEY_VERSION:v1}
+    # 逗号分隔 CIDR；为空时不信任任何代理转发头。
+    trusted-proxies: ${XDD_TRUSTED_PROXY_CIDRS:}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:}
+    allow-credentials: true
+  ai:
+    log-retention-days: ${AI_LOG_RETENTION_DAYS:0}
+    log-cleanup-cron: ${AI_LOG_CLEANUP_CRON:0 30 3 * * *}
+    zhipu:
+      enabled: ${ZHIPU_ENABLED:false}
+      api-key: ${ZHIPU_API_KEY:}
+      base-url: https://open.bigmodel.cn/api/paas/v4
+      model-vision: glm-4v-plus
+      model-chat: glm-4-plus
+      timeout-ms: 15000
+  rate-limit:
+    login-attempts: ${LOGIN_RATE_LIMIT_ATTEMPTS:10}
+    login-window-seconds: ${LOGIN_RATE_LIMIT_WINDOW_SECONDS:60}
+  wechat:
+    miniapp:
+      enabled: ${WX_LOGIN_ENABLED:false}
+      appid: ${WX_APPID:}
+      secret: ${WX_SECRET:}
+      timeout-ms: 5000
+    pay:
+      enabled: false

@@ -84,7 +84,7 @@ public class FeedbackController {
         return Result.ok(Map.of(
                 "feedbackId", fb.getId(),
                 "status", fb.getStatus(),
-                "message", "已收到您的反馈，工作日 30 分钟内回复"
+                "message", "反馈已收到，处理进度以实际状态为准"
         ));
     }
 

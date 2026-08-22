@@ -2,29 +2,37 @@
   "name": "xiaodudou-miniapp",
   "displayName": "小肚兜 AI",
   "version": "0.0.1",
+  "type": "module",
+  "engines": {
+    "node": ">=20 <25"
+  },
   "description": "小肚兜 AI - 母婴营养小程序",
   "scripts": {
     "dev:h5": "uni",
     "build:h5": "uni build",
     "dev:mp-weixin": "uni -p mp-weixin",
-    "build:mp-weixin": "uni build -p mp-weixin"
+    "build:mp-weixin": "uni build -p mp-weixin",
+    "preflight:prod": "node scripts/production-preflight.mjs",
+    "test": "npm run test:api",
+    "test:api": "node --test scripts/api-response.test.mjs scripts/module3-contract.test.mjs scripts/module4-contract.test.mjs scripts/tabbar-assets.test.mjs",
+    "generate:tabbar": "python scripts/generate-tabbar-icons.py"
   },
   "dependencies": {
-    "@dcloudio/uni-app": "3.0.0-5000720260410001",
-    "@dcloudio/uni-components": "3.0.0-5000720260410001",
-    "@dcloudio/uni-h5": "3.0.0-5000720260410001",
-    "@dcloudio/uni-mp-weixin": "3.0.0-5000720260410001",
-    "pinia": "2.0.36",
+    "pinia": "2.2.4",
     "vue": "3.4.21",
-    "wot-design-uni": "^1.7.0"
+    "wot-design-uni": "1.14.0"
   },
   "devDependencies": {
-    "@dcloudio/types": "^3.4.8",
-    "@dcloudio/uni-cli-shared": "3.0.0-5000720260410001",
-    "@dcloudio/vite-plugin-uni": "3.0.0-5000720260410001",
-    "@vue/tsconfig": "^0.5.1",
-    "sass": "^1.77.0",
-    "typescript": "^5.4.5",
+    "@dcloudio/types": "3.4.31",
+    "@dcloudio/uni-app": "3.0.0-5020420260813003",
+    "@dcloudio/uni-cli-shared": "3.0.0-5020420260813003",
+    "@dcloudio/uni-components": "3.0.0-5020420260813003",
+    "@dcloudio/uni-h5": "3.0.0-5020420260813003",
+    "@dcloudio/uni-mp-weixin": "3.0.0-5020420260813003",
+    "@dcloudio/vite-plugin-uni": "3.0.0-5020420260813003",
+    "@vue/tsconfig": "0.5.1",
+    "sass": "1.103.1",
+    "typescript": "5.9.3",
     "vite": "5.2.8"
   }
 }

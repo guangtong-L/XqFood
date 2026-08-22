@@ -1,4 +1,4 @@
-import { http } from '../utils/request'
+import { http, request } from '../utils/request'
 
 export interface WxLoginResp {
   token: string
@@ -6,12 +6,13 @@ export interface WxLoginResp {
   nickname: string
   avatarUrl?: string
   vipLevel: number
+  loginMode: 'real' | 'mock'
 }
 
 export const authApi = {
-  /** M1 Mock 登录：随便传个 code 即可 */
+  /** 微信 code 登录；Mock 仅由后端 dev/local 显式开关控制。 */
   wxLogin(params: { code: string; nickname?: string; avatarUrl?: string }) {
-    return http.post<WxLoginResp>('/api/v1/auth/wx-login', params)
+    return request<WxLoginResp>({ url: '/api/v1/auth/wx-login', method: 'POST', data: params, skipAuth: true })
   },
   logout() {
     return http.post('/api/v1/auth/logout')

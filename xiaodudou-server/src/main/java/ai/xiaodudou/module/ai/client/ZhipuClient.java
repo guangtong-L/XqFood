@@ -50,9 +50,9 @@ public class ZhipuClient {
     /**
      * 视觉对话：传入图片字节 + Prompt，返回模型文本
      */
-    public String chatWithImage(byte[] imageBytes, String prompt) {
+    public String chatWithImage(byte[] imageBytes, String mediaType, String prompt) {
         String imageB64 = Base64.encode(imageBytes);
-        String dataUrl = "data:image/jpeg;base64," + imageB64;
+        String dataUrl = "data:" + mediaType + ";base64," + imageB64;
 
         JSONObject body = new JSONObject();
         body.set("model", modelVision);
@@ -106,7 +106,7 @@ public class ZhipuClient {
             log.info("[Zhipu] cost={}ms status={} bodyLen={}", cost, resp.getStatus(), respBody.length());
 
             if (!resp.isOk()) {
-                log.error("[Zhipu] HTTP {}: {}", resp.getStatus(), respBody);
+                log.error("[Zhipu] upstream_http_error status={} bodyLen={}", resp.getStatus(), respBody.length());
                 throw new RuntimeException("智谱 API 调用失败: HTTP " + resp.getStatus());
             }
 
@@ -119,8 +119,9 @@ public class ZhipuClient {
                     .getJSONObject("message")
                     .getStr("content", "");
         } catch (Exception e) {
-            log.error("[Zhipu] 调用异常 cost={}ms", System.currentTimeMillis() - start, e);
-            throw new RuntimeException("AI 服务不可用: " + e.getMessage(), e);
+            log.error("[Zhipu] upstream_call_failed cost={}ms type={}",
+                    System.currentTimeMillis() - start, e.getClass().getSimpleName());
+            throw new RuntimeException("AI 服务不可用", e);
         }
     }
 }

@@ -17,7 +17,7 @@ import org.springframework.stereotype.Component;
  *
  * 文档：https://developers.weixin.qq.com/miniprogram/dev/api-backend/open-api/login/auth.code2Session.html
  *
- * ⚠️ AppSecret 必须存于 application-local.yml（已 gitignore）
+ * ⚠️ AppSecret 必须由部署环境安全注入
  * ⚠️ session_key 必须留服务端，不可返回前端
  */
 @Slf4j
@@ -70,8 +70,8 @@ public class WechatClient {
             log.info("[Wechat] code2Session cost={}ms status={}", cost, resp.getStatus());
 
             if (!resp.isOk()) {
-                log.error("[Wechat] HTTP 异常: {}", body);
-                throw new BusinessException(ResultCode.LOGIN_FAILED, "微信登录服务异常");
+                log.error("[Wechat] HTTP 异常 status={}", resp.getStatus());
+                throw new BusinessException(ResultCode.SERVICE_UNAVAILABLE, "微信登录服务异常");
             }
 
             JSONObject json = JSONUtil.parseObj(body);
@@ -79,9 +79,8 @@ public class WechatClient {
 
             // 微信成功时 errcode 可能不存在或为 0
             if (errcode != null && errcode != 0) {
-                String errmsg = json.getStr("errmsg", "unknown");
-                log.warn("[Wechat] 业务错误: errcode={} errmsg={}", errcode, errmsg);
-                handleErrcode(errcode, errmsg);
+                log.warn("wechat_business_error errcode={}", errcode);
+                handleErrcode(errcode);
             }
 
             Code2SessionResult r = new Code2SessionResult();
@@ -96,20 +95,20 @@ public class WechatClient {
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
-            log.error("[Wechat] 调用异常", e);
-            throw new BusinessException(ResultCode.LOGIN_FAILED, "微信登录失败：" + e.getMessage());
+            log.error("[Wechat] 调用异常 type={}", e.getClass().getSimpleName());
+            throw new BusinessException(ResultCode.SERVICE_UNAVAILABLE, "微信登录服务暂时不可用");
         }
     }
 
     /** 微信错误码到业务错误的映射 */
-    private void handleErrcode(int errcode, String errmsg) {
+    private void handleErrcode(int errcode) {
         // 文档: https://developers.weixin.qq.com/miniprogram/dev/framework/server-ability/backend-api.html
         switch (errcode) {
-            case -1 -> throw new BusinessException(ResultCode.SERVER_ERROR, "微信服务繁忙，请稍后重试");
+            case -1 -> throw new BusinessException(ResultCode.SERVICE_UNAVAILABLE, "微信服务繁忙，请稍后重试");
             case 40029 -> throw new BusinessException(ResultCode.LOGIN_FAILED, "登录凭证无效，请重新登录");
             case 45011 -> throw new BusinessException(ResultCode.RATE_LIMIT, "微信接口频率限制，请稍后重试");
             case 40226 -> throw new BusinessException(ResultCode.FORBIDDEN, "账号风险拦截");
-            default -> throw new BusinessException(ResultCode.LOGIN_FAILED, "微信登录失败: " + errmsg);
+            default -> throw new BusinessException(ResultCode.LOGIN_FAILED, "微信登录失败，请重新登录");
         }
     }
 

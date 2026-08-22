@@ -7,7 +7,7 @@
       <button class="btn-primary" @tap="goHome">回到首页</button>
       <button class="btn-ghost" @tap="goBack">返回上一页</button>
     </view>
-    <view class="footer">如持续异常，请联系客服 contact@xiaodudou.ai</view>
+    <view class="footer">如持续异常，请通过“帮助与反馈”提交问题</view>
   </view>
 </template>
 

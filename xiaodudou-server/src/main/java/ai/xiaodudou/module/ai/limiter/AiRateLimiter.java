@@ -8,20 +8,15 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
-import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 
-/**
- * AI 接口限流：日额度 + 分钟级防刷
- * - 日额度：免费 5 / VIP 50（识别+推荐合并计数）
- * - 分钟级：每用户每分钟最多 3 次（防刷点击）
- *
- * 超限抛 BusinessException，前端按 code 区分提示
- */
+/** AI 日额度与分钟窗口的 Redis 原子限流。生产 AI 关闭时也保持实现本身安全。 */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -40,72 +35,86 @@ public class AiRateLimiter {
     private int burstPerMin;
 
     private static final DateTimeFormatter MINUTE_FMT = DateTimeFormatter.ofPattern("yyyyMMddHHmm");
+    static final DefaultRedisScript<Long> CONSUME_SCRIPT = new DefaultRedisScript<>("""
+            local burst = tonumber(redis.call('GET', KEYS[1]) or '0')
+            local daily = tonumber(redis.call('GET', KEYS[2]) or '0')
+            if burst >= tonumber(ARGV[1]) then return -1 end
+            if daily >= tonumber(ARGV[2]) then return -2 end
+            burst = redis.call('INCR', KEYS[1])
+            if burst == 1 then redis.call('EXPIRE', KEYS[1], ARGV[3]) end
+            daily = redis.call('INCR', KEYS[2])
+            if daily == 1 then redis.call('EXPIRE', KEYS[2], ARGV[4]) end
+            return daily
+            """, Long.class);
+    static final DefaultRedisScript<Long> ROLLBACK_SCRIPT = new DefaultRedisScript<>("""
+            for _, key in ipairs(KEYS) do
+              local current = tonumber(redis.call('GET', key) or '0')
+              if current > 0 then redis.call('DECR', key) end
+            end
+            return 1
+            """, Long.class);
 
-    /**
-     * 检查并扣减额度。
-     * 顺序：先分钟级（防刷）→ 再日额度（防滥用）
-     * 任一超限直接抛异常，不消耗对方额度
-     */
-    public void checkAndConsume(Long userId) {
-        // ===== 1. 分钟级 =====
-        String minuteKey = "ai:burst:" + userId + ":" + LocalDateTime.now().format(MINUTE_FMT);
-        Long burstCount = redis.opsForValue().increment(minuteKey);
-        if (burstCount != null && burstCount == 1L) {
-            redis.expire(minuteKey, Duration.ofSeconds(70));
-        }
-        if (burstCount != null && burstCount > burstPerMin) {
-            log.warn("[RateLimit] 用户 {} 分钟级超限 {}/{}", userId, burstCount, burstPerMin);
-            throw new BusinessException(ResultCode.RATE_LIMIT,
-                    "操作过快，请稍后再试");
-        }
-
-        // ===== 2. 日额度 =====
+    public QuotaLease checkAndConsume(Long userId) {
         boolean isVip = isVipUser(userId);
-        int limit = isVip ? vipDailyLimit : freeDailyLimit;
-        String dailyKey = "ai:daily:" + userId + ":" + LocalDate.now();
-        Long dailyCount = redis.opsForValue().increment(dailyKey);
-        if (dailyCount != null && dailyCount == 1L) {
-            redis.expire(dailyKey, Duration.ofHours(36));  // 跨日宽容
-        }
-        if (dailyCount != null && dailyCount > limit) {
-            log.info("[RateLimit] 用户 {} 日额度用尽 {}/{} isVip={}", userId, dailyCount, limit, isVip);
-            String msg = isVip
-                    ? "今日 AI 额度已用完（" + limit + " 次/日）"
-                    : "今日免费额度已用完（" + freeDailyLimit + " 次/日），开通月子卡解锁 " + vipDailyLimit + " 次/日";
-            throw new BusinessException(ResultCode.AI_QUOTA_USED_UP, msg);
+        int dailyLimit = isVip ? vipDailyLimit : freeDailyLimit;
+        String slot = "{" + userId + "}";
+        String minuteKey = "ai:quota:" + slot + ":burst:" + LocalDateTime.now().format(MINUTE_FMT);
+        String dailyKey = "ai:quota:" + slot + ":daily:" + LocalDate.now();
+        try {
+            Long result = redis.execute(CONSUME_SCRIPT, List.of(minuteKey, dailyKey),
+                    Integer.toString(burstPerMin), Integer.toString(dailyLimit), "70", "129600");
+            if (result == null) throw new IllegalStateException("empty redis result");
+            if (result == -1L) {
+                log.warn("ai_rate_limit_exceeded dimension=burst userId={}", userId);
+                throw new BusinessException(ResultCode.RATE_LIMIT, "操作过快，请稍后再试");
+            }
+            if (result == -2L) {
+                log.info("ai_rate_limit_exceeded dimension=daily userId={} vip={}", userId, isVip);
+                throw new BusinessException(ResultCode.AI_QUOTA_USED_UP, "今日 AI 额度已用完，请明日再试");
+            }
+            return new QuotaLease(minuteKey, dailyKey);
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("ai_rate_limit_unavailable errorType={}", e.getClass().getSimpleName());
+            throw new BusinessException(ResultCode.SERVICE_UNAVAILABLE, "AI 服务暂时不可用，请稍后重试");
         }
     }
 
-    /** 查询用户剩余额度（前端展示用） */
     public RemainingQuota getRemaining(Long userId) {
         boolean isVip = isVipUser(userId);
         int limit = isVip ? vipDailyLimit : freeDailyLimit;
-        String dailyKey = "ai:daily:" + userId + ":" + LocalDate.now();
-        String val = redis.opsForValue().get(dailyKey);
-        int used = val == null ? 0 : Integer.parseInt(val);
-        return new RemainingQuota(limit, used, Math.max(0, limit - used), isVip);
+        String dailyKey = "ai:quota:{" + userId + "}:daily:" + LocalDate.now();
+        try {
+            String val = redis.opsForValue().get(dailyKey);
+            int used = val == null ? 0 : Math.max(0, Integer.parseInt(val));
+            return new RemainingQuota(limit, used, Math.max(0, limit - used), isVip);
+        } catch (Exception e) {
+            log.error("ai_rate_limit_read_failed errorType={}", e.getClass().getSimpleName());
+            throw new BusinessException(ResultCode.SERVICE_UNAVAILABLE, "AI 服务暂时不可用，请稍后重试");
+        }
     }
 
-    /** 出错时回滚一次（如智谱调用失败，不应扣额度） */
-    public void rollback(Long userId) {
+    /** 回滚创建时记录的精确窗口，跨分钟也不会误减别的计数；Lua 保证不会减成负数。 */
+    public void rollback(QuotaLease lease) {
+        if (lease == null) return;
         try {
-            redis.opsForValue().decrement("ai:daily:" + userId + ":" + LocalDate.now());
-            redis.opsForValue().decrement("ai:burst:" + userId + ":"
-                    + LocalDateTime.now().format(MINUTE_FMT));
+            redis.execute(ROLLBACK_SCRIPT, List.of(lease.minuteKey(), lease.dailyKey()));
         } catch (Exception e) {
-            log.warn("[RateLimit] 回滚失败 userId={}: {}", userId, e.getMessage());
+            log.warn("ai_rate_limit_rollback_failed errorType={}", e.getClass().getSimpleName());
         }
     }
 
     private boolean isVipUser(Long userId) {
         try {
-            User u = userMapper.selectById(userId);
-            return u != null && u.getVipLevel() != null && u.getVipLevel() > 0
-                    && (u.getVipExpireAt() == null || u.getVipExpireAt().isAfter(LocalDateTime.now()));
+            User user = userMapper.selectById(userId);
+            return user != null && user.getVipLevel() != null && user.getVipLevel() > 0
+                    && (user.getVipExpireAt() == null || user.getVipExpireAt().isAfter(LocalDateTime.now()));
         } catch (Exception e) {
             return false;
         }
     }
 
-    public record RemainingQuota(int limit, int used, int remaining, boolean isVip) {}
+    public record RemainingQuota(int limit, int used, int remaining, boolean isVip) { }
+    public record QuotaLease(String minuteKey, String dailyKey) { }
 }

@@ -1,4 +1,4 @@
-import { http, API_BASE_URL, TOKEN_STORAGE_KEY } from '../utils/request'
+import { http, API_BASE_URL, TOKEN_STORAGE_KEY, processApiResponse, showRequestError, ApiError } from '../utils/request'
 
 export interface RecognizedIngredient {
   name: string
@@ -9,48 +9,60 @@ export interface RecognizedIngredient {
 }
 
 export interface AiRecommendation {
-  recipeId: string
-  title: string
-  coverUrl?: string
+  recipe: {
+    id: number
+    title: string
+    coverUrl?: string
+    cookMinutes?: number
+    nutrition?: Record<string, number>
+    stageTags?: string[]
+  }
   matchScore: number
   reason: string
-  nutrition?: Record<string, number>
-  cookMinutes?: number
-  stageTags?: string[]
   missingIngredients?: Array<{ name: string; quantity: string }>
+}
+
+interface AiResponseMeta {
+  aiLabel: string
+  fallback: boolean
+  disclaimer: string
 }
 
 export const aiApi = {
   /** 食材识别 - 上传图片（multipart） */
-  recognize(filePath: string, stageHint?: string): Promise<{ ingredients: RecognizedIngredient[]; requestId: string }> {
+  recognize(filePath: string): Promise<{ ingredients: RecognizedIngredient[]; requestId: string; modelVersion: string } & AiResponseMeta> {
     const token = uni.getStorageSync(TOKEN_STORAGE_KEY)
     return new Promise((resolve, reject) => {
       uni.uploadFile({
         url: API_BASE_URL + '/api/v1/ai/recognize',
         filePath,
         name: 'image',
-        formData: stageHint ? { stageHint } : {},
         header: token ? { 'x-token': token } : {},
+        timeout: 30000,
         success: (res) => {
           try {
-            const body = JSON.parse(res.data)
-            if (body.code === 0) resolve(body.data)
-            else { uni.showToast({ title: body.message, icon: 'none' }); reject(body) }
-          } catch (e) { reject(e) }
+            resolve(processApiResponse(res.statusCode, res.data))
+          } catch (error) {
+            showRequestError(error, '上传失败')
+            reject(error)
+          }
         },
-        fail: (e) => { uni.showToast({ title: '上传失败', icon: 'none' }); reject(e) }
+        fail: (error) => {
+          const requestError = new ApiError(error.errMsg?.includes('timeout') ? '上传超时，请稍后重试' : '上传失败，请检查网络')
+          showRequestError(requestError)
+          reject(requestError)
+        }
       })
     })
   },
 
   /** 菜谱推荐 */
   recommend(params: {
-    stage: Record<string, unknown>
-    ingredients: Array<{ name: string; quantity?: string }>
-    constraints?: { allergies?: string[]; dislikes?: string[]; maxCookMinutes?: number }
-    count?: number
+    ingredients: Array<{ name: string; quantityEstimate?: string }>
+    maxCookMinutes: number
+    count: number
   }) {
-    return http.post<{ recommendations: AiRecommendation[]; disclaimer: string }>(
+    return http.post<{ recommendations: AiRecommendation[]; allergyNotice: string } & AiResponseMeta>(
       '/api/v1/ai/recommend',
       params as unknown as Record<string, unknown>
     )

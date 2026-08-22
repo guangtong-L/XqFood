@@ -5,6 +5,8 @@
 > 接手对象：换工具后的自己 / 新 AI 会话 / 团队成员
 > 文档约定：以下所有路径基于 Windows + WSL2 环境
 
+> **2026-08-21 当前上线边界优先于下方历史记录**：生产 AI、社区、会员、支付、退款和营养报告均关闭。AI 客户端代码只用于开发验证，真实内容安全审核供应商未接入验收前不得开启；生产不允许 Mock 或固定结果降级。微信 AppID、真实登录、生产域名、密钥托管、内容安全与法务验收仍是外部前置。
+
 ---
 
 ## 0. 一分钟项目快照（最重要，先读这个）
@@ -17,7 +19,7 @@
 | 商业模式 | 阶段会员（599/399/299）+ 食材电商 CPS + 营养师抽佣 + B 端授权 |
 | 核心 LTV | 单付费用户预计 865 元 / CAC 167 元 / 回本 3.5 月 |
 | 关键凭据 | 智谱 API Key（**已暴露需吊销**，见第 6 节） |
-| 当前能跑通的演示 | 登录→画像→拍冰箱→AI 识别→AI 推荐→详情→收藏→打卡 全链路 |
+| 当前可用核心链路 | 登录/画像（开发验证）→菜谱浏览→详情→收藏→用户确认餐次和份数后记录；生产 AI 关闭 |
 
 ---
 
@@ -67,7 +69,7 @@ D:\code\xiaodudou\                    # 主代码仓
         └── pages\
             ├── index\index.vue       # 首页
             ├── auth\wx-login.vue     # 微信登录
-            ├── profile\setup.vue     # 4 步画像
+            ├── profile\setup.vue     # 5 步敏感信息确认与画像
             ├── camera\
             │   ├── index.vue         # 拍照
             │   ├── result.vue        # 识别结果
@@ -116,23 +118,21 @@ C:\Users\lgt10\
 
 ### 2.1 M1 W2 - 收藏 + 打卡闭环 ✅
 - **后端**：6 接口（4 收藏 + 3 打卡），1 实体 + 1 Mapper + 1 Controller
-- **前端**：2 新页面（收藏列表 + 打卡日历）+ 详情页 ❤ 按钮 + 推荐页"加入今日"接真实接口
+- **前端**：收藏列表、打卡日历与详情页收藏；打卡仅允许在详情页由用户确认“已完成/已食用”、餐次、份数后提交，推荐页不直接产生打卡
 - **测试**：端到端 12/12 通过（`D:\docker\xiaodudou\e2e-favorite-checkin.ps1`）
 
-### 2.2 P0 体验优化 ✅
-- 拍照页 AI 识别加进度条 + 30-40s 文案变化 + 取消按钮
+### 2.2 核心体验与 AI 安全收口 ✅
+- 首页、菜谱、详情、收藏、打卡区分加载/空/错误并提供重试，远程图片有失败占位
 - 识别结果页 0 食材完整空状态 + 8 个快速添加常用食材
-- 推荐页 loading + fallback 兜底 + 重试按钮
-- 首页营养雷达"未打卡引导卡"
+- 推荐页只展示上架候选强类型结果；生产结构异常明确失败
+- 步骤倒计时支持暂停、继续、重置、关闭与离页清理
 - 全局 `feedback.ts`（loading/toast/confirm 统一）
 
-### 2.3 智谱 AI 真实接入 ✅
-- **视觉模型** GLM-4V-Plus：食材识别（替代 Mock）
-- **文本模型** GLM-4-Plus：菜谱推荐（替代 Mock）
-- 失败/未启用自动**降级 Mock**（不断流）
-- 客户端：`module/ai/client/ZhipuClient.java` 用 Hutool HttpUtil 直调
-- 实测延迟：视觉 15-40s，文本 3-8s
-- 超时配置 60s，文件上传上限 8MB
+### 2.3 AI 开发客户端与生产闸门 ✅
+- 仓库保留智谱视觉/文本客户端用于开发环境显式验证，不代表生产选型和合规验收完成
+- 生产总闸门强制关闭 AI；控制器后端拒绝，前端隐藏入口，旧直达页诚实显示暂未开放
+- 图片上限 5MB，只接受魔数匹配的 JPEG/PNG，并限制尺寸与总像素
+- 生产外部失败、超时或结构异常明确失败，绝不自动降级 Mock；开发 Mock 必须显式开启并标注
 
 ### 2.4 后端业务模块 ✅
 **用户/画像**（A 闭环）
@@ -140,6 +140,8 @@ C:\Users\lgt10\
 - POST `/api/v1/auth/logout`
 - GET `/api/v1/user/me`
 - GET/POST `/api/v1/user/profile`
+- DELETE `/api/v1/user/me`（事务清理、账号匿名化、财务记录保留）
+- 用户与画像接口使用 DTO 白名单；画像新写入仅保存 AES-GCM 密文，并以 userId 作为附加认证数据防止跨用户替换
 
 **食谱/食材**（B+D 闭环）
 - GET `/api/v1/recipes`（分页 + stageTag 筛选 + keyword 搜索）
@@ -160,14 +162,14 @@ C:\Users\lgt10\
 
 **系统**
 - GET `/api/v1/health`
-- Knife4j 文档：http://localhost:8080/doc.html
+- OpenAPI 文档（仅非生产）：http://localhost:8080/swagger-ui.html
 
 ### 2.5 前端业务页面 ✅
 | 页面 | 完成度 | 路径 |
 |---|---|---|
 | 首页 | 95% | `pages/index/index.vue` |
 | 微信登录 | 80%（Mock） | `pages/auth/wx-login.vue` |
-| 4 步阶段画像 | 95% | `pages/profile/setup.vue` |
+| 5 步敏感确认与阶段画像 | 95% | `pages/profile/setup.vue` |
 | 拍照 | 95% | `pages/camera/index.vue` |
 | 识别结果 | 95% | `pages/camera/result.vue` |
 | AI 推荐 | 95% | `pages/camera/recommend.vue` |
@@ -176,7 +178,7 @@ C:\Users\lgt10\
 | 我的 | 90% | `pages/me/index.vue` |
 | 收藏列表 | 95% | `pages/me/favorites.vue` |
 | 打卡日历 | 95% | `pages/me/checkin.vue` |
-| 妈妈圈 | 5%（占位） | `pages/community/index.vue` |
+| 妈妈圈 | 安全关闭 | `pages/community/index.vue`（直达页不请求接口） |
 
 ### 2.6 基础设施 ✅
 - ✅ JDK 17（环境变量已切换，JDK 8 保留未删）
@@ -186,9 +188,9 @@ C:\Users\lgt10\
 - ✅ Docker Compose 2.40.3 + 4 个国内镜像加速器
 - ✅ MySQL 8.0.37 容器（端口 3307，named volume 持久化）
 - ✅ Redis 7.2.5 容器（端口 6379）
-- ✅ Flyway 自动迁移（V1 + V2 已落库）
-- ✅ Sa-Token 鉴权（UUID token，30 天）
-- ✅ Knife4j API 文档
+- ✅ Flyway 自动迁移（已发布 V1–V7，不得修改历史迁移）
+- ✅ Sa-Token 鉴权（最长 7 天、无操作最长 12 小时，均可配置）
+- ✅ springdoc OpenAPI（生产环境安全闸门强制关闭）
 - ✅ Lombok + MyBatis-Plus + Hutool
 - ✅ WSL keepalive 进程（防止 docker 容器闲置重启）
 
@@ -260,10 +262,10 @@ npm run dev:h5
 | 服务 | 端口 | 验证 URL |
 |---|---|---|
 | Spring Boot 后端 | 8080 | http://localhost:8080/api/v1/health |
-| Knife4j API 文档 | 8080 | http://localhost:8080/doc.html |
+| OpenAPI 文档（仅非生产） | 8080 | http://localhost:8080/swagger-ui.html |
 | Vite H5 前端 | 5173 | http://localhost:5173/ |
 | MySQL 8（Docker） | 3307 | jdbc:mysql://localhost:3307/xiaodudou |
-| Redis 7（Docker） | 6379 | docker exec xiaodudou-redis redis-cli -a Xxx PING |
+| Redis 7（Docker） | 6379 | `docker exec -it xiaodudou-redis redis-cli --askpass PING`（交互输入新密码） |
 | 旧 MySQL 5.7（本机） | 3306 | （未启用，仅占用） |
 
 ### 3.4 一键端到端测试
@@ -286,7 +288,7 @@ npm run dev:h5
 | 吊销地址 | https://bigmodel.cn/usercenter/proj-mgmt/apikeys |
 | 模型 | 视觉=glm-4v-plus，文本=glm-4-plus |
 | 超时 | 60000 ms |
-| 配置项 | `xiaodudou.ai.zhipu.enabled=true`（false 时全走 mock） |
+| 配置项 | `xiaodudou.ai.zhipu.enabled=true`；关闭时生产返回明确错误，只有 dev/local 显式开启 Mock 才允许模拟结果 |
 
 **首次拉代码后必须做的**：
 
@@ -297,7 +299,7 @@ npm run dev:h5
 xiaodudou:
   ai:
     zhipu:
-      api-key: 你的真实Key
+      api-key: ${ZHIPU_API_KEY:}
       base-url: https://open.bigmodel.cn/api/paas/v4
       model-vision: glm-4v-plus
       model-chat: glm-4-plus
@@ -350,9 +352,10 @@ xiaodudou:
 | 2 | AI 备案未启动 | **本周联系代办** |
 | 3 | 微信小程序 AppID 未注册 | 主体备齐后 1-3 天可下 |
 | 4 | ICP 备案未做 | 域名解析前需要，20 天周期 |
-| 5 | 过敏硬规则**仅依赖 Prompt** | Java 端必须二次过滤（用 `t_ingredient.allergen_tags` 黑名单） |
-| 6 | AI 调用未限流 | Redis + 用户日额度，否则 Key 被刷爆 |
-| 7 | AI 调用日志未落库 `t_ai_call_log`（表已建但代码没写入） | 合规要求留存 ≥ 180 天 |
+| 5 | 过敏硬规则已实现前后两次服务端过滤 | 上线前补齐标签数据和真机回归 |
+| 6 | AI 调用已实现 Redis 日额度和分钟级限制 | 生产验证 Redis 可用性和告警 |
+| 7 | AI 日志已最小化并实现每日清理 | 上线前经法务确认 1..365 天周期并完成生产配置、审计 |
+| 8 | 敏感画像已实现 AES-GCM 静态加密和历史明文迁移 | 上线前完成持久密钥托管、灾备、恢复演练、轮换、权限与访问审计；密钥丢失会使对应画像永久不可解密 |
 
 ### 🟡 P1 - 体验/运营问题
 
@@ -362,8 +365,8 @@ xiaodudou:
 | 9 | 计时器只 toast | 做真实倒计时弹层 |
 | 10 | 打卡无防刷（1 秒打 100 次也行） | 加节流/限频 |
 | 11 | `t_user_recipe_action` 表没 `meal_type` 字段 | V3 迁移加列 |
-| 12 | uni-app 微信小程序版（mp-weixin）跑不了 | 需 AppID |
-| 13 | 真实 wx-login 是 Mock | 接 jscode2session 替换 AuthController |
+| 12 | mp-weixin 已可构建，但真实 AppID 未配置 | 配置后用微信开发者工具真机验收 |
+| 13 | jscode2session 已实现，生产配置未就绪时会拒绝启动 | 注入真实 AppID/Secret，Mock 仅限 dev/local 显式开启 |
 | 14 | 内容审核未接 | 接腾讯云内容安全过滤 AI 输出 |
 
 ### 🟢 P2 - 体验细节
@@ -372,8 +375,8 @@ xiaodudou:
 |---|---|
 | 15 | 菜谱列表无下拉刷新/上拉加载 |
 | 16 | 收藏列表无分页（>100 道才需要） |
-| 17 | 阶段画像无法跳过（应允许"以后再说"） |
-| 18 | 头像图片用 placehold.co 可能跨域 |
+| 17 | 阶段画像现已支持返回/稍后填写，并在采集前单独确认敏感信息用途 |
+| 18 | 登录页已移除外部占位头像，真实头像授权流程仍需产品确认 |
 | 19 | PowerShell 控制台显示中文乱码（GBK），实际数据是 UTF-8 |
 | 20 | mvn 启动 banner 中文乱码（同上） |
 
@@ -383,9 +386,9 @@ xiaodudou:
 
 ### 🔴 M1 收尾必做（1-3 天）
 
-- [ ] 加 AI 限流（Redis + 用户日额度）
-- [ ] 加过敏硬规则 Java 端二次过滤
-- [ ] AI 调用日志落库 `t_ai_call_log`
+- [x] 加 AI 限流（Redis + 用户日额度）
+- [x] 加过敏硬规则 Java 端二次过滤
+- [x] AI 调用日志落库 `t_ai_call_log`
 - [ ] 接腾讯云内容安全审核
 - [ ] 微信 AppID 申请 + manifest 替换
 
@@ -393,7 +396,7 @@ xiaodudou:
 
 | 页面 | 工时 | 备注 |
 |---|---|---|
-| 营养报告（雷达图真实数据） | 1.5d | 关联打卡 + 阶段目标 |
+| 营养报告（暂未开放） | 待专业口径验收 | 当前关闭目标百分比、雷达图与达标判断，仅提供基于主动记录的营养估算 |
 | 妈妈圈动态流（只读版） | 2d | 同阶段打卡墙 |
 | 引导页（首次启动 3 屏滑动） | 0.5d | 拉新 |
 | 设置页（通知/缓存/版本） | 0.5d | |
@@ -424,12 +427,12 @@ xiaodudou:
 
 | 功能 | 价值 |
 |---|---|
-| AI 限流（Redis 滑动窗口） | 防 Key 被刷 |
-| AI 调用日志落表 | 合规留存 180 天 |
-| 过敏硬规则二次校验 | 安全兜底 |
+| AI 限流生产监控与压测 | 验证 Redis 故障和高并发行为 |
+| AI 日志留存/删除任务 | 自动清理已实现；周期须经法务确认并支持访问审计 |
+| 过敏标签数据验收 | 保证两次硬规则过滤的数据基础 |
 | 食谱后台导入工具（Excel→SQL） | 让运营填 300 道库 |
 | 食谱向量化召回（pgvector / Milvus） | M3 智能推荐升级 |
-| 微信真实 jscode2session | 替换 Mock 登录 |
+| 微信真实环境联调 | jscode2session 代码已完成，待真实 AppID/Secret 和真机验证 |
 | 内容审核（腾讯云内容安全） | 合规 |
 
 ---
@@ -442,11 +445,11 @@ xiaodudou:
 | MySQL 数据卷用 named volume 而非 bind 到 D 盘 | NTFS 不支持 Linux 权限，MySQL 直接挂会启动失败 | D 盘备份用 mysqldump |
 | WSL `vmIdleTimeout=-1` + keepalive 进程 | 默认 60 秒闲置就关 WSL，导致 docker 容器反复重启 | 关电脑前 keepalive 进程会丢，开机要重启 |
 | WSL networkingMode=NAT（非 mirrored） | mirrored 与 Meta 软件 198.18.0.1 网卡冲突 | localhost forwarding 已正常 |
-| uni-app 用 `3.0.0-5000720260410001` 稳定版而非 `vue3` dist-tag | DCloud 同天发布不同包版本不一致导致 npm 失败 | 升级时全家桶要一起升 |
-| `application-local.yml` 存 Key（gitignore） | 比环境变量友好 | 永远不要 git add |
+| uni-app 全家桶固定同一 `3.0.0-5020420260813003` 发行版 | DCloud 同天发布不同包版本不一致会导致 npm 失败 | 升级时全家桶必须一起升并重建锁文件 |
+| 本地忽略配置或安全 `.env` 存 Key | 便于本地跨重启复用且不进入仓库 | 永远不要 git add；必须加密备份并验证恢复，丢失后已有画像不可解密 |
 | MyBatis-Plus 而非 JPA | 国内事实标准 + 开发效率 | 团队招聘 Java 工程师注意 |
-| Sa-Token 而非自撸 JWT | 比 JWT 省 80% 代码 | UUID token，30 天 |
-| AI 失败自动降级 Mock | 避免业务断流 | 监控要区分真实 vs mock |
+| Sa-Token 而非自建会话方案 | 统一登录态、停用与注销失效策略 | 最长 7 天、无操作最长 12 小时，可配置 |
+| AI 失败按环境处理 | 生产返回明确错误；仅 dev/local 且显式开启时允许标注为开发 fallback | 禁止把开发模拟结果伪装成真实识别 |
 
 ---
 
@@ -476,8 +479,8 @@ curl http://localhost:5173/
 # === Docker 运维 ===
 wsl docker ps                          # 看容器
 wsl docker compose -f /mnt/d/docker/xiaodudou/docker-compose.yml logs -f mysql
-wsl docker exec xiaodudou-mysql mysql -uxiaodudou -p'XddApp@2026Mysql!' xiaodudou
-wsl docker exec xiaodudou-redis redis-cli -a 'XddRedis@2026!'
+wsl docker exec -it xiaodudou-mysql mysql -uxiaodudou -p xiaodudou  # 交互式输入新密码
+wsl docker exec -it xiaodudou-redis redis-cli --askpass  # 交互式输入新密码
 
 # === 端到端测试 ===
 & 'D:\docker\xiaodudou\e2e-test.ps1'
@@ -485,7 +488,7 @@ wsl docker exec xiaodudou-redis redis-cli -a 'XddRedis@2026!'
 
 # === 数据库连接（DBeaver/Navicat 等）===
 # Host: localhost  Port: 3307
-# User: xiaodudou  Pass: XddApp@2026Mysql!
+# User: ${DB_USERNAME}  Pass: ${DB_PASSWORD}（从安全凭据管理系统获取）
 # DB:   xiaodudou
 ```
 
@@ -495,9 +498,10 @@ wsl docker exec xiaodudou-redis redis-cli -a 'XddRedis@2026!'
 
 按优先级：
 
-1. **吊销旧智谱 Key**（5 分钟）
-   - 上 https://bigmodel.cn 删除暴露的 Key
-   - 生成新 Key，替换 `application-local.yml`
+1. **立即轮换所有曾写入仓库或交接材料的凭据**
+   - MySQL、Redis、智谱 AI 等旧凭据均按已泄露处理，必须在对应服务端吊销或改密。
+   - 新凭据只允许通过环境变量、配置中心或本地忽略配置注入，禁止再次写入 Git、命令示例或聊天记录。
+   - 轮换后检查旧凭据已失效，再运行仓库安全扫描与连接验证；不要在验证输出中打印凭据。
 
 2. **本地跑通**（30 分钟）
    - 按第 3 节启动顺序，4 步全跑起来
@@ -527,7 +531,7 @@ wsl docker exec xiaodudou-redis redis-cli -a 'XddRedis@2026!'
 
 ```
 我是小肚兜 AI 项目的创始人，项目是中国版母婴营养小程序，
-当前 M1 阶段约 70% 完成，技术栈是 Spring Boot 3.2 + uni-app + MySQL 8 + Redis 7 + 智谱 GLM-4V/4。
+当前项目处于上线可靠性加固阶段，技术栈是 Spring Boot 3.5.16 + uni-app + MySQL 8 + Redis 7。生产 AI、支付、社区和营养报告均保持关闭。
 
 代码在 D:\code\xiaodudou\，Docker 在 D:\docker\xiaodudou\，
 完整交接文档在 D:\code\xiaodudou\HANDOVER.md，请先读这份文档了解全貌。
@@ -535,7 +539,7 @@ wsl docker exec xiaodudou-redis redis-cli -a 'XddRedis@2026!'
 接手第一件事：检查所有服务是否在线（按 HANDOVER.md 第 3 节），
 然后告诉我下一步建议（参考 HANDOVER.md 第 6 节 Roadmap）。
 
-我倾向先做：[填你想做的，例如"M1 收尾必做的 5 项合规"或"M2 营养报告"]
+我倾向先做：[填写已完成安全评审、具备明确数据口径和验收标准的模块]
 ```
 
 ---
@@ -600,7 +604,7 @@ curl -X POST http://localhost:8080/api/v1/auth/wx-login \
 | 工信部备案 | https://beian.miit.gov.cn | ICP 备案查询 |
 | 网信办算法备案 | https://beian.cac.gov.cn | AI 备案 |
 | 腾讯云内容安全 | https://console.cloud.tencent.com/cms | 内容审核 |
-| Knife4j 本地文档 | http://localhost:8080/doc.html | API 调试 |
+| OpenAPI 本地文档 | http://localhost:8080/swagger-ui.html | 仅非生产 API 调试 |
 | uni-app 文档 | https://uniapp.dcloud.net.cn/ | 前端框架 |
 | MyBatis-Plus 文档 | https://baomidou.com | 后端 ORM |
 
@@ -611,18 +615,18 @@ curl -X POST http://localhost:8080/api/v1/auth/wx-login \
 | 组件 | 版本 |
 |---|---|
 | Java | 17.0.12 LTS |
-| Spring Boot | 3.2.5 |
-| MyBatis-Plus | 3.5.7 |
-| Sa-Token | 1.39.0 |
-| Knife4j | 4.5.0 |
+| Spring Boot | 3.5.16 |
+| MyBatis-Plus | 3.5.17 |
+| Sa-Token | 1.46.0 |
+| springdoc | 2.8.17（仅非生产） |
 | MySQL | 8.0.37 |
 | Redis | 7.2.5-alpine |
 | Node | 24.12.0 |
-| uni-app | 3.0.0-5000720260410001 |
+| uni-app | 3.0.0-5020420260813003 |
 | Vue | 3.4.21 |
 | Vite | 5.2.8 |
-| Pinia | 2.0.36 |
-| 智谱 GLM | glm-4v-plus / glm-4-plus |
+| Pinia | 2.2.4 |
+| AI | 生产关闭；恢复需内容安全审核专项验收 |
 
 ---
 

@@ -19,19 +19,13 @@
     "mp-weixin": {
         "appid": "TODO_REPLACE_WITH_REAL_APPID",
         "setting": {
-            "urlCheck": false,
+            "urlCheck": true,
             "es6": true,
             "minified": true,
             "postcss": true
         },
         "usingComponents": true,
-        "lazyCodeLoading": "requiredComponents",
-        "permission": {
-            "scope.userLocation": {
-                "desc": "你的位置信息将用于推荐附近食材采购点"
-            }
-        },
-        "requiredPrivateInfos": ["chooseImage"]
+        "lazyCodeLoading": "requiredComponents"
     },
     "h5": {
         "router": {

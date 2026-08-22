@@ -7,6 +7,9 @@ export interface CheckinItem {
   coverUrl?: string
   nutrition?: Record<string, number>
   checkedAt: string
+  mealType?: 'breakfast' | 'lunch' | 'dinner' | 'snack'
+  servings?: number
+  actionDate: string
 }
 
 export interface CalendarData {
@@ -19,8 +22,8 @@ export interface CalendarData {
 
 export const checkinApi = {
   /** 打卡（完成了某个菜谱） */
-  checkin(recipeId: string | number, mealType?: 'breakfast' | 'lunch' | 'dinner' | 'snack') {
-    return http.post('/api/v1/checkin', { recipeId, mealType })
+  checkin(input: { recipeId: string | number; mealType: 'breakfast' | 'lunch' | 'dinner' | 'snack'; servings: number; actionDate?: string }) {
+    return http.post<{ actionId: string; created: boolean; alreadyExists: boolean }>('/api/v1/checkin', input)
   },
   /** 今日打卡列表 */
   today() {
@@ -29,5 +32,8 @@ export const checkinApi = {
   /** 月度日历 */
   calendar(month?: string) {
     return http.get<CalendarData>('/api/v1/checkin/calendar', month ? { month } : undefined)
+  },
+  remove(actionId: string | number) {
+    return http.delete<{ deleted: boolean }>(`/api/v1/checkin/${actionId}`)
   }
 }

@@ -5,7 +5,7 @@
       <view class="stage-emoji">👋</view>
       <view class="stage-info">
         <view class="stage-title">点击登录</view>
-        <view class="stage-sub">登录后享 AI 个性化推荐</view>
+        <view class="stage-sub">登录后可保存收藏和已食用记录</view>
       </view>
       <view class="stage-arrow">→</view>
     </view>
@@ -15,7 +15,7 @@
       <view class="stage-emoji">📝</view>
       <view class="stage-info">
         <view class="stage-title">完善阶段信息</view>
-        <view class="stage-sub">完善后 AI 才能为你个性化</view>
+        <view class="stage-sub">用于展示阶段信息，敏感画像可稍后填写</view>
       </view>
       <view class="stage-arrow">→</view>
     </view>
@@ -25,13 +25,13 @@
       <view class="stage-emoji">{{ stageEmoji }}</view>
       <view class="stage-info">
         <view class="stage-title">{{ stageTitle }}</view>
-        <view class="stage-sub">今日重点：{{ stageFocus }}</view>
+        <view class="stage-sub">阶段信息仅用于筛选与展示，请结合个人情况核对</view>
       </view>
       <view class="stage-arrow">→</view>
     </view>
 
     <!-- AI 入口 -->
-    <view class="ai-entry" @tap="goCamera">
+    <view v-if="AI_FEATURE_ENABLED" class="ai-entry" @tap="goCamera">
       <view class="ai-icon">📸</view>
       <view class="ai-text">
         <view class="ai-title">拍冰箱，AI 给你做菜</view>
@@ -45,42 +45,40 @@
         <text class="section-title">📅 推荐菜谱</text>
         <text class="section-link" @tap="goRecipes">更多</text>
       </view>
-      <view class="meal-list" v-if="recipes.length">
+      <view v-if="recipeState === 'loading'" class="empty">正在加载菜谱...</view>
+      <view v-else-if="recipeState === 'error'" class="state-box">菜谱加载失败，请检查网络<button @tap="loadRecipes">重试</button></view>
+      <view class="meal-list" v-else-if="recipes.length">
         <view class="meal-card" v-for="r in recipes" :key="r.id" @tap="goDetail(r.id)">
-          <image class="meal-img" :src="r.coverUrl" mode="aspectFill" />
+          <image v-if="r.coverUrl && !failedImages.has(String(r.id))" class="meal-img" :src="r.coverUrl" mode="aspectFill" @error="markImageFailed(r.id)" />
+          <view v-else class="meal-img image-fallback">🍲</view>
           <view class="meal-name">{{ r.title }}</view>
         </view>
       </view>
-      <view v-else class="empty">加载中...</view>
+      <view v-else class="empty">暂无上架菜谱，可到菜谱页稍后重试</view>
     </view>
 
-    <!-- 营养雷达 -->
+    <!-- 仅基于主动记录的营养估算 -->
     <view class="section">
       <view class="section-header">
-        <text class="section-title">📊 本周营养</text>
-        <text v-if="hasCheckin" class="section-link">详情</text>
+        <text class="section-title">📋 今日已记录</text>
       </view>
-
-      <!-- 未打卡引导 -->
-      <view v-if="!hasCheckin" class="nutrition-empty">
+      <view v-if="nutritionState === 'loading'" class="empty">正在加载记录...</view>
+      <view v-else-if="nutritionState === 'error'" class="state-box">今日记录加载失败，不能据此判断为空<button @tap="loadNutrition">重试</button></view>
+      <view v-else-if="!hasCheckin" class="nutrition-empty">
         <view class="ne-icon">📋</view>
-        <view class="ne-text">完成今日打卡后，AI 自动为你计算</view>
-        <view class="ne-sub">连续打卡 3 天解锁专属营养报告</view>
-        <view class="ne-btn" @tap="goCheckin">开始打卡</view>
+        <view class="ne-text">尚未记录已完成/已食用的菜谱</view>
+        <view class="ne-sub">只有您确认餐次和份数后才会计入</view>
+        <view class="ne-btn" @tap="goRecipes">去查看菜谱</view>
       </view>
-
-      <!-- 有打卡数据，真实雷达 -->
       <view v-else class="nutrition-list">
-        <view class="nutrition-item" v-for="n in topNutrition" :key="n.key">
-          <view class="nutrition-name">{{ n.name }}</view>
-          <view class="nutrition-bar">
-            <view class="nutrition-bar-inner"
-                  :class="{ over: n.percent > 100 }"
-                  :style="{ width: Math.min(100, n.percent) + '%' }"></view>
+        <view class="record-summary">今日已记录 {{ nutrition?.recordedEntries || 0 }} 餐 / {{ nutrition?.recordedServings || 0 }} 份</view>
+        <view class="estimate-title">估算营养（仅基于记录，不代表全天摄入）</view>
+        <view class="estimate-grid">
+          <view class="estimate-item" v-for="item in estimatedItems" :key="item.key">
+            <text>{{ item.label }}</text><text>{{ item.value }} {{ item.unit }}</text>
           </view>
-          <view class="nutrition-percent" :class="{ over: n.percent > 100 }">{{ n.percent }}%</view>
         </view>
-        <view class="nutrition-tip">已打卡 {{ todayCheckinCount }} 餐 · 目标按"{{ topNutritionStage }}"计算</view>
+        <view class="nutrition-tip">{{ nutrition?.disclaimer }}</view>
       </view>
     </view>
   </view>
@@ -91,12 +89,15 @@ import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useUserStore } from '../../store/user'
 import { recipeApi, type Recipe } from '../../api/recipe'
-import { checkinApi } from '../../api/checkin'
-import { nutritionApi, type NutritionItem } from '../../api/nutrition'
+import { nutritionApi, type NutritionToday } from '../../api/nutrition'
 import { feedback } from '../../utils/feedback'
+import { AI_FEATURE_ENABLED } from '../../config/features'
 
 const userStore = useUserStore()
 const recipes = ref<Recipe[]>([])
+const recipeState = ref<'loading' | 'ready' | 'error'>('loading')
+const nutritionState = ref<'loading' | 'ready' | 'error'>('loading')
+const failedImages = ref(new Set<string>())
 
 const stageEmoji = computed(() => {
   const t = userStore.profile?.stageType
@@ -117,64 +118,47 @@ const stageTitle = computed(() => {
   if (p.stageType === 'CHILD') return '儿童餐'
   return p.stageType
 })
-const stageFocus = computed(() => {
-  const t = userStore.profile?.stageType
-  if (t === 'POSTPARTUM') return '催乳 + 补血'
-  if (t === 'PREGNANCY') return '叶酸 + 钙铁'
-  if (t === 'WEANING') return '月龄阶梯营养'
-  return '均衡营养'
-})
-
-// 真实营养数据
-const nutritionItems = ref<NutritionItem[]>([])
-const todayCheckinCount = ref(0)
-const hasCheckin = computed(() => todayCheckinCount.value > 0)
-
-// 首页只显示 4 个核心维度（热量/蛋白/钙/铁）
-const topNutrition = computed(() =>
-  nutritionItems.value.filter(n => ['calories','protein','calcium','iron'].includes(n.key))
-)
-
-const STAGE_LABEL: Record<string, string> = {
-  PREPARE: '备孕', PREGNANCY: '孕期', POSTPARTUM: '哺乳期',
-  WEANING: '辅食期', CHILD: '儿童期'
+const nutrition = ref<NutritionToday | null>(null)
+const hasCheckin = computed(() => (nutrition.value?.recordedEntries || 0) > 0)
+const nutrientMeta: Record<string, { label: string; unit: string }> = {
+  calories: { label: '热量', unit: 'kcal' }, protein: { label: '蛋白质', unit: 'g' },
+  calcium: { label: '钙', unit: 'mg' }, iron: { label: '铁', unit: 'mg' },
+  vitA: { label: '维A', unit: 'μg' }, vitC: { label: '维C', unit: 'mg' }
 }
-const topNutritionStage = computed(() => {
-  const s = userStore.profile?.stageType
-  return s ? (STAGE_LABEL[s] || s) : '通用'
-})
+const estimatedItems = computed(() => Object.entries(nutrition.value?.estimatedNutrition || {}).map(([key, value]) => ({
+  key, value, label: nutrientMeta[key]?.label || key, unit: nutrientMeta[key]?.unit || ''
+})))
 
 async function loadNutrition() {
   if (!userStore.isLoggedIn) {
-    nutritionItems.value = []
-    todayCheckinCount.value = 0
+    nutrition.value = null
+    nutritionState.value = 'ready'
     return
   }
+  nutritionState.value = 'loading'
   try {
-    const data = await nutritionApi.today()
-    nutritionItems.value = data.items || []
-    todayCheckinCount.value = data.checkinCount || 0
+    nutrition.value = await nutritionApi.today()
+    nutritionState.value = 'ready'
   } catch {
-    nutritionItems.value = []
-    todayCheckinCount.value = 0
+    nutritionState.value = 'error'
   }
-}
-
-function goCheckin() {
-  if (!userStore.isLoggedIn) {
-    uni.navigateTo({ url: '/pages/auth/wx-login' })
-    return
-  }
-  uni.navigateTo({ url: '/pages/me/checkin' })
 }
 
 async function loadRecipes() {
+  recipeState.value = 'loading'
   try {
     const tag = userStore.profile?.stageType === 'POSTPARTUM' ? 'lactation' :
                 userStore.profile?.stageType === 'WEANING' ? 'weaning' : ''
     const data = await recipeApi.list({ stageTag: tag, size: 3, page: 1 })
     recipes.value = data.records
-  } catch (e) { console.error(e) }
+    recipeState.value = 'ready'
+  } catch (e) {
+    recipeState.value = 'error'
+  }
+}
+
+function markImageFailed(id: string | number) {
+  failedImages.value = new Set(failedImages.value).add(String(id))
 }
 
 onShow(async () => {
@@ -187,7 +171,7 @@ onShow(async () => {
 
 function goLogin() { uni.navigateTo({ url: '/pages/auth/wx-login' }) }
 function goSetup() { uni.navigateTo({ url: '/pages/profile/setup' }) }
-function goCamera() { uni.switchTab({ url: '/pages/camera/index' }) }
+function goCamera() { uni.navigateTo({ url: '/pages/camera/index' }) }
 function goRecipes() { uni.switchTab({ url: '/pages/recipe/list' }) }
 function goDetail(id: string) { uni.navigateTo({ url: `/pages/recipe/detail?id=${id}` }) }
 </script>
@@ -226,25 +210,23 @@ function goDetail(id: string) { uni.navigateTo({ url: `/pages/recipe/detail?id=$
   }
 }
 .empty { text-align: center; color: #999; padding: 48rpx 0; font-size: 26rpx; }
+.state-box { text-align: center; color: #777; padding: 32rpx 0; font-size: 25rpx;
+  button { margin-top: 20rpx; width: 220rpx; min-height: 80rpx; border-radius: 40rpx; background: #FFF0EB; color: #D94F2B; font-size: 25rpx; }
+}
 .meal-list { display: flex; gap: 16rpx;
   .meal-card { flex: 1; background: #FFF8F5; border-radius: 12rpx; overflow: hidden;
     .meal-img { width: 100%; height: 160rpx; background: #eee; }
+    .image-fallback { display: flex; align-items: center; justify-content: center; font-size: 52rpx; color: #aaa; }
     .meal-name { padding: 16rpx; font-size: 24rpx; text-align: center; }
   }
 }
 .nutrition-list {
-  .nutrition-item { display: flex; align-items: center; margin-bottom: 16rpx;
-    .nutrition-name { width: 100rpx; font-size: 26rpx; }
-    .nutrition-bar { flex: 1; height: 16rpx; background: #f0f0f0; border-radius: 8rpx; overflow: hidden; margin: 0 16rpx;
-      .nutrition-bar-inner { height: 100%; background: linear-gradient(90deg, #FF8866, #FFB199); transition: width .3s;
-        &.over { background: linear-gradient(90deg, #4CAF50, #81C784); }
-      }
-    }
-    .nutrition-percent { width: 80rpx; font-size: 24rpx; color: #999; text-align: right;
-      &.over { color: #4CAF50; font-weight: 500; }
-    }
+  .record-summary { font-size: 30rpx; font-weight: 600; color: #333; }
+  .estimate-title { font-size: 24rpx; color: #666; margin-top: 20rpx; }
+  .estimate-grid { margin-top: 12rpx; display: grid; grid-template-columns: 1fr 1fr; gap: 12rpx;
+    .estimate-item { display: flex; justify-content: space-between; padding: 14rpx; background: #FFF8F5; border-radius: 10rpx; font-size: 23rpx; }
   }
-  .nutrition-tip { font-size: 22rpx; color: #ccc; text-align: center; margin-top: 16rpx; }
+  .nutrition-tip { font-size: 21rpx; color: #999; line-height: 1.6; margin-top: 18rpx; }
 }
 .nutrition-empty {
   text-align: center; padding: 24rpx 16rpx;

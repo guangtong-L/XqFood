@@ -9,9 +9,10 @@ import lombok.Data;
 
 import java.io.Serializable;
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
- * AI 调用日志（合规留存 ≥ 180 天）
+ * AI 调用日志（留存和删除周期待法务确认并实现自动清理）
  * 表 t_ai_call_log 已在 V1__init_schema.sql 建好
  */
 @Data
@@ -23,13 +24,11 @@ public class AiCallLog implements Serializable {
 
     private Long userId;
     private String endpoint;        // recognize / recommend
-    private String inputHash;
+    private Integer inputCount;
+    private Integer outputCount;
 
     @TableField(typeHandler = JacksonTypeHandler.class)
-    private Object inputPayload;
-
-    @TableField(typeHandler = JacksonTypeHandler.class)
-    private Object outputPayload;
+    private List<Long> recipeIds;
 
     private String modelVersion;
     private Integer costMs;

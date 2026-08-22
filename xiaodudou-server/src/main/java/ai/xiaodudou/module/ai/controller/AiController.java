@@ -1,342 +1,221 @@
 package ai.xiaodudou.module.ai.controller;
 
+import ai.xiaodudou.common.exception.BusinessException;
 import ai.xiaodudou.common.result.Result;
+import ai.xiaodudou.common.result.ResultCode;
+import ai.xiaodudou.config.RuntimeModePolicy;
 import ai.xiaodudou.module.ai.client.ZhipuClient;
-import ai.xiaodudou.module.ai.entity.AiCallLog;
+import ai.xiaodudou.module.ai.dto.AiIngredientCategory;
+import ai.xiaodudou.module.ai.dto.MissingIngredientResponse;
+import ai.xiaodudou.module.ai.dto.RecommendRequest;
+import ai.xiaodudou.module.ai.dto.RecognitionResponse;
+import ai.xiaodudou.module.ai.dto.RecognizedIngredientResponse;
+import ai.xiaodudou.module.ai.dto.RecommendationItemResponse;
+import ai.xiaodudou.module.ai.dto.RecommendationResponse;
 import ai.xiaodudou.module.ai.filter.AllergyFilter;
 import ai.xiaodudou.module.ai.limiter.AiRateLimiter;
-import ai.xiaodudou.module.ai.mapper.AiCallLogMapper;
+import ai.xiaodudou.module.ai.service.AiAuditLogService;
+import ai.xiaodudou.module.ai.service.AiFeatureGate;
+import ai.xiaodudou.module.ai.service.AiOutputParser;
+import ai.xiaodudou.module.ai.service.AiPromptBuilder;
+import ai.xiaodudou.module.ai.service.ImageUploadValidator;
+import ai.xiaodudou.module.ai.service.ValidatedImage;
+import ai.xiaodudou.module.recipe.dto.RecipeResponse;
 import ai.xiaodudou.module.recipe.entity.Recipe;
 import ai.xiaodudou.module.recipe.mapper.RecipeMapper;
-import ai.xiaodudou.module.user.entity.UserProfile;
-import ai.xiaodudou.module.user.mapper.UserProfileMapper;
-import cn.dev33.satoken.annotation.SaIgnore;
+import ai.xiaodudou.module.user.dto.ProfileData;
+import ai.xiaodudou.module.user.service.ProfileService;
 import cn.dev33.satoken.stp.StpUtil;
-import cn.hutool.core.util.StrUtil;
-import cn.hutool.crypto.digest.DigestUtil;
-import cn.hutool.json.JSONArray;
-import cn.hutool.json.JSONObject;
-import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import lombok.Data;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
-import java.time.LocalDateTime;
-import java.util.*;
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 
-/**
- * AI 接口（含 限流 + 过敏硬规则 + 调用日志 三层防护）
- */
 @Slf4j
-@Tag(name = "04 - AI")
+@Tag(name = "04 - AI（默认关闭）")
 @RestController
 @RequestMapping("/api/v1/ai")
 @RequiredArgsConstructor
 public class AiController {
+    private static final String RECOGNIZE_PROMPT = """
+            你是食材图片结构化识别程序，不是医生或营养师。
+            只识别图片中可见食材，不提供医疗、营养、母婴阶段或安全建议。
+            category只能是：蔬菜、水果、肉禽、海鲜、蛋奶、主食、豆制品、调味料、其他。
+            最多输出20项；名称不超过20字；quantityEstimate不超过20字；confidence必须在0到1之间。
+            严格输出JSON：{"ingredients":[{"name":"番茄","category":"蔬菜","quantityEstimate":"2个","confidence":0.9,"emoji":"🍅"}]}
+            """;
+    private static final String DISCLAIMER = "AI 辅助结果仅供食材整理和菜谱浏览参考，不构成医疗或营养建议，请人工核对。";
+    private static final String ALLERGY_NOTICE = "仅基于现有食材过敏标签降低已知风险；标签可能不完整，食用前仍需人工核对食材、包装与个人情况。";
 
     private final RecipeMapper recipeMapper;
-    private final UserProfileMapper userProfileMapper;
+    private final ProfileService profileService;
     private final ZhipuClient zhipu;
     private final AiRateLimiter rateLimiter;
     private final AllergyFilter allergyFilter;
-    private final AiCallLogMapper aiCallLogMapper;
+    private final AiAuditLogService aiAuditLogService;
+    private final RuntimeModePolicy runtimeModePolicy;
+    private final AiFeatureGate aiFeatureGate;
+    private final ImageUploadValidator imageUploadValidator;
+    private final AiOutputParser outputParser;
+    private final AiPromptBuilder promptBuilder;
 
-    private static final String RECOGNIZE_PROMPT = """
-            你是一名专业食材识别助手。请分析图片中的所有可见生鲜食材，严格按下述 JSON Schema 输出。
-
-            规则：
-            1. 只识别可食用的生鲜食材；忽略包装/餐具/桌面/已做好的成品菜。
-            2. name 必须用中文标准名（番茄/西红柿 统一为"番茄"）。
-            3. category 取值：蔬菜 / 水果 / 肉禽 / 海鲜 / 蛋奶 / 主食 / 豆制品 / 调味料 / 其他。
-            4. 置信度 < 0.6 的不输出。
-            5. quantityEstimate 给粗略估算，例如"2 个""200g""一把"。无法判断填 null。
-            6. emoji 给该食材的代表 emoji。
-            7. 不输出任何医疗 / 营养建议。
-            8. 直接输出 JSON 对象，不要任何 markdown 标记。
-
-            输出 schema：
-            {
-              "ingredients": [
-                {"name":"string","category":"枚举","quantityEstimate":"string|null","confidence":0.0-1.0,"emoji":"string"}
-              ]
-            }
-            """;
-
-    // ============ 查询额度（前端展示）============
     @GetMapping("/quota")
-    @Operation(summary = "查询当前用户 AI 剩余额度")
+    @Operation(summary = "查询开发环境AI剩余额度")
     public Result<AiRateLimiter.RemainingQuota> quota() {
+        aiFeatureGate.requireAvailable();
         return Result.ok(rateLimiter.getRemaining(StpUtil.getLoginIdAsLong()));
     }
 
-    // ============ 食材识别 ============
     @PostMapping(value = "/recognize", consumes = "multipart/form-data")
-    @Operation(summary = "食材识别（限流 + 调用日志）")
-    public Result<Map<String, Object>> recognize(
-            @RequestPart("image") MultipartFile image,
-            @RequestParam(required = false) String stageHint) {
-
+    @Operation(summary = "食材图片识别（默认关闭）")
+    public Result<RecognitionResponse> recognize(@RequestPart("image") MultipartFile image) {
+        aiFeatureGate.requireAvailable();
         Long userId = StpUtil.getLoginIdAsLong();
-        long t0 = System.currentTimeMillis();
-        String modelVersion = "mock-fallback";
-        Integer status = 1;
-        Object outputForLog = null;
-
-        // 1. 限流（超限直接抛异常，不进业务、不落日志）
-        rateLimiter.checkAndConsume(userId);
-
-        Map<String, Object> data = new HashMap<>();
-        data.put("requestId", UUID.randomUUID().toString());
-
+        ValidatedImage validatedImage = imageUploadValidator.validate(image);
+        AiRateLimiter.QuotaLease quotaLease = rateLimiter.checkAndConsume(userId);
+        long startedAt = System.currentTimeMillis();
+        String modelVersion = "unavailable";
+        int outputCount = 0;
+        boolean success = false;
         try {
+            BusinessException invalidOutput = null;
             if (zhipu.isEnabled()) {
                 try {
-                    byte[] bytes = image.getBytes();
-                    String text = zhipu.chatWithImage(bytes, RECOGNIZE_PROMPT);
-                    JSONObject parsed = parseJsonLoose(text);
-                    JSONArray arr = parsed.getJSONArray("ingredients");
-                    if (arr != null) {
-                        data.put("ingredients", arr);
-                        data.put("lowConfidenceCount", 0);
-                        data.put("modelVersion", "glm-4v-plus");
-                        modelVersion = "glm-4v-plus";
-                        outputForLog = arr;
-                        return Result.ok(data);
-                    }
-                    log.warn("[AI] 视觉模型返回 JSON 不含 ingredients 字段，降级 mock");
-                } catch (IOException e) {
-                    log.error("读取上传图片失败", e);
-                    rateLimiter.rollback(userId);  // 系统问题，回滚额度
-                    status = 0;
+                    String text = zhipu.chatWithImage(validatedImage.bytes(), validatedImage.mediaType(), RECOGNIZE_PROMPT);
+                    List<RecognizedIngredientResponse> ingredients = outputParser.parseRecognition(text);
+                    modelVersion = "glm-4v-plus";
+                    outputCount = ingredients.size();
+                    success = true;
+                    return Result.ok(new RecognitionResponse(UUID.randomUUID().toString(), ingredients,
+                            modelVersion, false, "AI辅助识别", DISCLAIMER));
+                } catch (BusinessException e) {
+                    invalidOutput = e;
+                    log.warn("ai_recognize_invalid_output type={}", e.getClass().getSimpleName());
                 } catch (Exception e) {
-                    log.error("[AI] 智谱视觉识别失败，降级 mock: {}", e.getMessage());
-                    // 注意：智谱失败不回滚额度——用户已发起请求，配额按"尝试"计
+                    log.warn("ai_recognize_upstream_failed type={}", e.getClass().getSimpleName());
                 }
             }
-
-            // ===== Mock 兜底 =====
-            data.put("ingredients", mockIngredients());
-            data.put("lowConfidenceCount", 0);
-            data.put("modelVersion", "mock-fallback");
-            outputForLog = data.get("ingredients");
-            return Result.ok(data);
+            if (!runtimeModePolicy.isMockAiAllowed()) {
+                if (invalidOutput != null) throw invalidOutput;
+                throw new BusinessException(ResultCode.AI_SERVICE_UNAVAILABLE);
+            }
+            List<RecognizedIngredientResponse> mock = mockIngredients();
+            modelVersion = "mock-fallback";
+            outputCount = mock.size();
+            success = true;
+            return Result.ok(new RecognitionResponse(UUID.randomUUID().toString(), mock,
+                    modelVersion, true, "开发模式模拟结果", DISCLAIMER));
         } finally {
-            logAiCall(userId, "recognize", null, outputForLog, modelVersion,
-                    (int) (System.currentTimeMillis() - t0), status);
+            if (!success) rateLimiter.rollback(quotaLease);
+            aiAuditLogService.record(userId, "recognize", 1, outputCount, null, modelVersion,
+                    (int) (System.currentTimeMillis() - startedAt), success ? 1 : 0);
         }
-    }
-
-    // ============ 推荐 ============
-    @Data
-    public static class RecommendReq {
-        private Map<String, Object> stage;
-        private List<Map<String, Object>> ingredients;
-        private Map<String, Object> constraints;
-        private Integer count = 3;
     }
 
     @PostMapping("/recommend")
-    @Operation(summary = "菜谱推荐（限流 + 过敏过滤 + 调用日志）")
-    public Result<Map<String, Object>> recommend(@RequestBody RecommendReq req) {
+    @Operation(summary = "候选菜谱AI排序（默认关闭）")
+    public Result<RecommendationResponse> recommend(@Valid @RequestBody RecommendRequest request) {
+        aiFeatureGate.requireAvailable();
         Long userId = StpUtil.getLoginIdAsLong();
-        long t0 = System.currentTimeMillis();
-        String modelVersion = "mock-fallback";
-        Integer status = 1;
-
-        // 1. 限流
-        rateLimiter.checkAndConsume(userId);
-
-        // 2. 读用户阶段画像（用于过敏过滤）
-        UserProfile profile = userProfileMapper.selectOne(
-                new LambdaQueryWrapper<UserProfile>().eq(UserProfile::getUserId, userId));
-        List<String> userAllergies = profile != null && profile.getAllergies() != null
-                ? profile.getAllergies() : List.of();
-        boolean isPostpartum = profile != null && "POSTPARTUM".equals(profile.getStageType());
-
-        // 3. 召回候选
-        List<Recipe> candidates = recipeMapper.selectList(
-                new LambdaQueryWrapper<Recipe>()
-                        .eq(Recipe::getStatus, 1)
-                        .last("limit 20"));
-
-        // 3.1 ⚠️ 召回阶段就过滤掉不安全的菜谱（双层保险，AI 之前先过滤）
-        if (!candidates.isEmpty()) {
-            List<Long> candidateIds = candidates.stream().map(Recipe::getId).toList();
-            Set<Long> unsafe = allergyFilter.findUnsafeRecipes(candidateIds, userAllergies, isPostpartum);
-            if (!unsafe.isEmpty()) {
-                int before = candidates.size();
-                candidates = candidates.stream().filter(r -> !unsafe.contains(r.getId())).toList();
-                log.info("[AI] 召回阶段过敏过滤：{} → {} (剔除 {} 道)", before, candidates.size(), unsafe.size());
-            }
-        }
-
-        Map<Long, Recipe> candidateMap = new HashMap<>();
-        for (Recipe r : candidates) candidateMap.put(r.getId(), r);
-
-        int count = req.getCount() == null ? 3 : req.getCount();
-        List<Map<String, Object>> recommendations = new ArrayList<>();
-
+        AiRateLimiter.QuotaLease quotaLease = rateLimiter.checkAndConsume(userId);
+        long startedAt = System.currentTimeMillis();
+        String modelVersion = "unavailable";
+        List<RecommendationItemResponse> recommendations = List.of();
+        boolean success = false;
         try {
-            if (zhipu.isEnabled() && !candidates.isEmpty()) {
+            ProfileData profile = profileService.getData(userId);
+            List<String> allergies = profile == null || profile.getAllergies() == null
+                    ? List.of() : profile.getAllergies();
+
+            LambdaQueryWrapper<Recipe> query = new LambdaQueryWrapper<Recipe>()
+                    .eq(Recipe::getStatus, 1).eq(Recipe::getDeleted, 0)
+                    .and(wrapper -> wrapper.isNull(Recipe::getCookMinutes)
+                            .or().le(Recipe::getCookMinutes, request.getMaxCookMinutes()))
+                    .orderByDesc(Recipe::getId).last("LIMIT 20");
+            List<Recipe> candidates = recipeMapper.selectList(query);
+            if (!candidates.isEmpty() && !allergies.isEmpty()) {
+                Set<Long> conflicts = allergyFilter.findTagConflicts(
+                        candidates.stream().map(Recipe::getId).toList(), allergies);
+                candidates = candidates.stream().filter(recipe -> !conflicts.contains(recipe.getId())).toList();
+            }
+            if (candidates.isEmpty()) {
+                throw new BusinessException(ResultCode.RECIPE_NOT_FOUND, "暂无符合条件且标签无已知冲突的上架菜谱");
+            }
+
+            Map<Long, Recipe> candidateMap = new LinkedHashMap<>();
+            candidates.forEach(recipe -> candidateMap.put(recipe.getId(), recipe));
+            BusinessException invalidOutput = null;
+            if (zhipu.isEnabled()) {
                 try {
-                    String userPrompt = buildRecommendPrompt(req, candidates, count);
-                    String text = zhipu.chat(
-                            "你是一名中国注册营养师，擅长母婴营养。严格按 JSON schema 输出，不要任何 markdown 标记。",
-                            userPrompt);
-                    JSONObject parsed = parseJsonLoose(text);
-                    JSONArray arr = parsed.getJSONArray("recommendations");
-                    if (arr != null && !arr.isEmpty()) {
-                        for (Object o : arr) {
-                            JSONObject item = (JSONObject) o;
-                            Long rid = item.getLong("recipeId");
-                            Recipe r = candidateMap.get(rid);
-                            if (r == null) continue;
-                            Map<String, Object> rec = new HashMap<>();
-                            rec.put("recipeId", r.getId());
-                            rec.put("title", r.getTitle());
-                            rec.put("coverUrl", r.getCoverUrl());
-                            rec.put("matchScore", item.getInt("matchScore", 80));
-                            rec.put("reason", item.getStr("reason", ""));
-                            rec.put("nutrition", r.getNutrition());
-                            rec.put("cookMinutes", r.getCookMinutes());
-                            rec.put("stageTags", r.getStageTags());
-                            rec.put("missingIngredients", item.getJSONArray("missingIngredients"));
-                            recommendations.add(rec);
-                        }
-                        modelVersion = "glm-4-plus";
-                    }
+                    String text = zhipu.chat(AiPromptBuilder.SYSTEM_PROMPT,
+                            promptBuilder.build(request, profile, candidates));
+                    List<AiOutputParser.ModelRecommendation> parsed = outputParser.parseRecommendations(
+                            text, request.getCount(), candidateMap.keySet());
+                    recommendations = parsed.stream().map(item -> responseItem(candidateMap.get(item.recipeId()), item)).toList();
+                    modelVersion = "glm-4-plus";
+                } catch (BusinessException e) {
+                    invalidOutput = e;
+                    log.warn("ai_recommend_invalid_output type={}", e.getClass().getSimpleName());
                 } catch (Exception e) {
-                    log.error("[AI] 智谱推荐失败，降级 mock: {}", e.getMessage());
+                    log.warn("ai_recommend_upstream_failed type={}", e.getClass().getSimpleName());
                 }
             }
 
-            // 4. ⚠️ AI 结果二次过滤（防 AI 出错把过敏菜推给用户）
-            if (!recommendations.isEmpty()) {
-                List<Long> recIds = recommendations.stream()
-                        .map(m -> Long.valueOf(m.get("recipeId").toString())).toList();
-                Set<Long> unsafe = allergyFilter.findUnsafeRecipes(recIds, userAllergies, isPostpartum);
-                if (!unsafe.isEmpty()) {
-                    int before = recommendations.size();
-                    recommendations = recommendations.stream()
-                            .filter(m -> !unsafe.contains(Long.valueOf(m.get("recipeId").toString())))
-                            .toList();
-                    log.warn("[AI] AI 返回结果含过敏菜谱，二次过滤剔除 {} 道", before - recommendations.size());
-                }
-            }
-
-            // 5. Mock 兜底（含已过滤的候选）
             if (recommendations.isEmpty()) {
-                List<Map<String, Object>> fallback = new ArrayList<>();
-                int idx = 0;
-                for (Recipe r : candidates) {
-                    if (idx >= count) break;
-                    Map<String, Object> rec = new HashMap<>();
-                    rec.put("recipeId", r.getId());
-                    rec.put("title", r.getTitle());
-                    rec.put("coverUrl", r.getCoverUrl());
-                    rec.put("matchScore", 90 - idx * 5);
-                    rec.put("reason", "适合当前阶段，营养均衡（降级 Mock）");
-                    rec.put("nutrition", r.getNutrition());
-                    rec.put("cookMinutes", r.getCookMinutes());
-                    rec.put("stageTags", r.getStageTags());
-                    rec.put("missingIngredients", List.of());
-                    fallback.add(rec);
-                    idx++;
+                if (!runtimeModePolicy.isMockAiAllowed()) {
+                    if (invalidOutput != null) throw invalidOutput;
+                    throw new BusinessException(ResultCode.AI_SERVICE_UNAVAILABLE);
                 }
-                recommendations = fallback;
+                List<RecommendationItemResponse> fallback = new ArrayList<>();
+                int index = 0;
+                for (Recipe recipe : candidates) {
+                    if (index >= request.getCount()) break;
+                    fallback.add(new RecommendationItemResponse(RecipeResponse.from(recipe),
+                            Math.max(0, 90 - index * 5), "开发模式模拟排序，仅用于测试接口与页面",
+                            List.of()));
+                    index++;
+                }
+                recommendations = List.copyOf(fallback);
+                modelVersion = "mock-fallback";
             }
-
-            Map<String, Object> data = new HashMap<>();
-            data.put("recommendations", recommendations);
-            data.put("disclaimer", "AI 推荐仅供参考，特殊体质请咨询营养师或医生");
-            return Result.ok(data);
+            success = true;
+            return Result.ok(new RecommendationResponse(recommendations,
+                    "mock-fallback".equals(modelVersion) ? "开发模式模拟结果" : "AI辅助生成",
+                    "mock-fallback".equals(modelVersion), DISCLAIMER, ALLERGY_NOTICE));
         } finally {
-            String inputHash = DigestUtil.md5Hex(JSONUtil.toJsonStr(req));
-            logAiCall(userId, "recommend", req, recommendations, modelVersion,
-                    (int) (System.currentTimeMillis() - t0), status);
+            if (!success) rateLimiter.rollback(quotaLease);
+            List<Long> ids = recommendations.stream().map(item -> item.recipe().id()).distinct().limit(20).toList();
+            aiAuditLogService.record(userId, "recommend", request.getIngredients().size(), recommendations.size(), ids,
+                    modelVersion, (int) (System.currentTimeMillis() - startedAt), success ? 1 : 0);
         }
     }
 
-    // ============ 工具方法 ============
-
-    /** 异步可改，M1 同步写日志（量小） */
-    private void logAiCall(Long userId, String endpoint, Object input, Object output,
-                           String modelVersion, int costMs, Integer status) {
-        try {
-            AiCallLog log = new AiCallLog();
-            log.setUserId(userId);
-            log.setEndpoint(endpoint);
-            if (input != null) {
-                log.setInputHash(DigestUtil.md5Hex(JSONUtil.toJsonStr(input)));
-                log.setInputPayload(input);
-            }
-            log.setOutputPayload(output);
-            log.setModelVersion(modelVersion);
-            log.setCostMs(costMs);
-            log.setAuditStatus(1);  // M1 暂无内容审核，先标记通过
-            log.setStatus(status);
-            log.setCreatedAt(LocalDateTime.now());
-            aiCallLogMapper.insert(log);
-        } catch (Exception e) {
-            // 日志失败不能影响业务
-            log.error("[AiCallLog] 落库失败 userId={} endpoint={}: {}", userId, endpoint, e.getMessage());
-        }
+    private RecommendationItemResponse responseItem(Recipe recipe, AiOutputParser.ModelRecommendation item) {
+        return new RecommendationItemResponse(RecipeResponse.from(recipe), item.matchScore(),
+                item.reason(), item.missingIngredients());
     }
 
-    private String buildRecommendPrompt(RecommendReq req, List<Recipe> candidates, int count) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("【用户阶段】\n").append(JSONUtil.toJsonStr(req.getStage())).append("\n\n");
-        sb.append("【现有食材】\n").append(JSONUtil.toJsonStr(req.getIngredients())).append("\n\n");
-        sb.append("【限制条件】\n").append(JSONUtil.toJsonStr(req.getConstraints())).append("\n\n");
-
-        sb.append("【候选食谱】（只能从中选，已剔除过敏菜）\n");
-        for (Recipe r : candidates) {
-            sb.append("- id=").append(r.getId())
-              .append(" 菜名=").append(r.getTitle())
-              .append(" 标签=").append(r.getStageTags())
-              .append(" 耗时=").append(r.getCookMinutes()).append("分钟\n");
-        }
-
-        sb.append("\n【任务】\n")
-          .append("从候选食谱中，按以下规则选 ").append(count).append(" 道最适合的菜：\n")
-          .append("1. 食材匹配度 40 分：与现有食材覆盖度越高分越高\n")
-          .append("2. 阶段适配度 30 分：与用户阶段（如哺乳期/月子）营养需求匹配\n")
-          .append("3. 烹饪可行性 20 分：时间不超过 constraints.maxCookMinutes\n")
-          .append("4. 偏好 10 分：避开 constraints.dislikes\n\n")
-          .append("严格按下面 JSON 输出，不要 markdown：\n")
-          .append("""
-                  {
-                    "recommendations": [
-                      {"recipeId": int, "matchScore": 0-100, "reason": "≤60字说明为什么适合", "missingIngredients": [{"name":"...","quantity":"..."}]}
-                    ]
-                  }
-                  """);
-        return sb.toString();
-    }
-
-    private JSONObject parseJsonLoose(String text) {
-        if (StrUtil.isBlank(text)) return new JSONObject();
-        String t = text.trim();
-        if (t.startsWith("```")) {
-            int s = t.indexOf('\n');
-            int e = t.lastIndexOf("```");
-            if (s > 0 && e > s) t = t.substring(s + 1, e).trim();
-        }
-        return JSONUtil.parseObj(t);
-    }
-
-    private List<Map<String, Object>> mockIngredients() {
+    private List<RecognizedIngredientResponse> mockIngredients() {
         return List.of(
-                Map.of("name", "番茄", "category", "蔬菜", "quantityEstimate", "2 个", "confidence", 0.95, "emoji", "🍅"),
-                Map.of("name", "鸡蛋", "category", "蛋奶", "quantityEstimate", "3 个", "confidence", 0.92, "emoji", "🥚"),
-                Map.of("name", "白菜", "category", "蔬菜", "quantityEstimate", "200g", "confidence", 0.88, "emoji", "🥬"),
-                Map.of("name", "胡萝卜", "category", "蔬菜", "quantityEstimate", "1 根", "confidence", 0.85, "emoji", "🥕")
+                new RecognizedIngredientResponse("番茄", AiIngredientCategory.VEGETABLE, "2个", new BigDecimal("0.95"), "🍅"),
+                new RecognizedIngredientResponse("鸡蛋", AiIngredientCategory.EGG_DAIRY, "3个", new BigDecimal("0.92"), "🥚")
         );
     }
 }

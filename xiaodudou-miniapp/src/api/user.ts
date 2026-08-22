@@ -6,11 +6,11 @@ export interface User {
   avatarUrl?: string
   vipLevel: number
   vipExpireAt?: string
+  createdAt: string
+  profile: UserProfile | null
 }
 
 export interface UserProfile {
-  id?: string
-  userId?: string
   stageType: 'PREPARE' | 'PREGNANCY' | 'POSTPARTUM' | 'WEANING' | 'CHILD'
   pregnancyWeek?: number
   postpartumDay?: number
@@ -22,14 +22,21 @@ export interface UserProfile {
   healthNotes?: string
 }
 
+export interface SaveProfileRequest extends UserProfile {
+  sensitiveInfoConsent: true
+}
+
 export const userApi = {
   me() {
-    return http.get<{ user: User; profile: UserProfile | null }>('/api/v1/user/me')
+    return http.get<User>('/api/v1/user/me')
   },
   getProfile() {
     return http.get<UserProfile | null>('/api/v1/user/profile')
   },
-  saveProfile(profile: UserProfile) {
+  saveProfile(profile: SaveProfileRequest) {
     return http.post<UserProfile>('/api/v1/user/profile', profile as unknown as Record<string, unknown>)
+  },
+  deleteMe(confirmation: string) {
+    return http.delete<{ deleted: boolean }>('/api/v1/user/me', { confirmation })
   }
 }

@@ -1,16 +1,35 @@
 /**
- * 统一请求封装
+ * 统一请求封装：环境化地址、HTTP/业务错误、超时和登录失效采用一致策略。
  */
 
-const BASE_URL = 'http://localhost:8080'
-const TOKEN_KEY = 'x-token'
+import { ApiError, evaluateApiResponse, parseApiBody } from './api-response'
+export { ApiError } from './api-response'
 
-export interface ApiResult<T = unknown> {
-  code: number
-  message: string
-  data: T
-  timestamp: number
+const TOKEN_KEY = 'x-token'
+const rawBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').trim()
+
+function resolveBaseUrl() {
+  const baseUrl = (rawBaseUrl || (import.meta.env.DEV ? 'http://localhost:8080' : '')).replace(/\/$/, '')
+  if (!baseUrl) throw new Error('生产构建缺少 VITE_API_BASE_URL')
+
+  let parsed: URL
+  try {
+    parsed = new URL(baseUrl)
+  } catch {
+    throw new Error('VITE_API_BASE_URL 不是有效 URL')
+  }
+
+  if (import.meta.env.PROD) {
+    const host = parsed.hostname.toLowerCase()
+    if (parsed.protocol !== 'https:' || host === 'localhost' || host === '127.0.0.1') {
+      throw new Error('生产 VITE_API_BASE_URL 必须使用 HTTPS 且不能指向 localhost')
+    }
+  }
+  return baseUrl
 }
+
+const BASE_URL = resolveBaseUrl()
+let redirectingToLogin = false
 
 interface RequestOptions {
   url: string
@@ -21,15 +40,43 @@ interface RequestOptions {
   skipAuth?: boolean
 }
 
+
+export function handleUnauthorized() {
+  uni.removeStorageSync(TOKEN_KEY)
+  if (redirectingToLogin) return
+  redirectingToLogin = true
+  uni.showToast({ title: '登录已失效，请重新登录', icon: 'none' })
+  setTimeout(() => {
+    uni.reLaunch({
+      url: '/pages/auth/wx-login',
+      complete: () => { redirectingToLogin = false }
+    })
+  }, 500)
+}
+
+export function processApiResponse<T>(statusCode: number, raw: unknown): T {
+  const body = parseApiBody<T>(raw)
+  if (statusCode === 401 || body?.code === 30001) {
+    handleUnauthorized()
+    throw new ApiError('未登录或登录已失效', statusCode, body?.code)
+  }
+  return evaluateApiResponse<T>(statusCode, raw)
+}
+
+export function showRequestError(error: unknown, fallback = '网络异常，请稍后重试') {
+  const message = error instanceof Error
+    ? (error.message.includes('timeout') ? '请求超时，请稍后重试' : error.message)
+    : fallback
+  if (message !== '未登录或登录已失效') uni.showToast({ title: message || fallback, icon: 'none' })
+}
+
 export function request<T = unknown>(options: RequestOptions): Promise<T> {
   const token = uni.getStorageSync(TOKEN_KEY)
   const header: Record<string, string> = {
     'Content-Type': 'application/json',
     ...options.header
   }
-  if (token && !options.skipAuth) {
-    header[TOKEN_KEY] = token
-  }
+  if (token && !options.skipAuth) header[TOKEN_KEY] = token
 
   return new Promise((resolve, reject) => {
     uni.request({
@@ -39,24 +86,17 @@ export function request<T = unknown>(options: RequestOptions): Promise<T> {
       header,
       timeout: options.timeout ?? 10000,
       success: (res) => {
-        const body = res.data as ApiResult<T>
-        if (res.statusCode === 401 || body.code === 30001) {
-          uni.removeStorageSync(TOKEN_KEY)
-          uni.showToast({ title: '请先登录', icon: 'none' })
-          setTimeout(() => uni.redirectTo({ url: '/pages/auth/wx-login' }), 500)
-          reject(new Error('未登录'))
-          return
-        }
-        if (body.code === 0) {
-          resolve(body.data)
-        } else {
-          uni.showToast({ title: body.message ?? '请求失败', icon: 'none' })
-          reject(new Error(body.message))
+        try {
+          resolve(processApiResponse<T>(res.statusCode, res.data))
+        } catch (error) {
+          showRequestError(error)
+          reject(error)
         }
       },
-      fail: (err) => {
-        uni.showToast({ title: '网络异常', icon: 'none' })
-        reject(err)
+      fail: (error) => {
+        const requestError = new ApiError(error.errMsg?.includes('timeout') ? '请求超时，请稍后重试' : '网络异常，请检查网络连接')
+        showRequestError(requestError)
+        reject(requestError)
       }
     })
   })

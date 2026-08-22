@@ -28,20 +28,20 @@ const current = ref(0)
 const slides = [
   {
     emoji: '🤱',
-    title: '为妈妈和宝宝定制',
-    desc: '告诉我们你的阶段，AI 为你推荐合适的菜谱',
+    title: '浏览现有菜谱',
+    desc: '按阶段标签查看上架菜谱；标签仅作信息筛选，不代表专业营养结论',
     bg: 'linear-gradient(135deg, #FF8866, #FFB199)'
   },
   {
-    emoji: '📸',
-    title: '拍冰箱，30 秒出菜谱',
-    desc: 'AI 识别食材 + 智能推荐 + 自动避开过敏源',
+    emoji: '⭐',
+    title: '收藏常用菜谱',
+    desc: '登录后保存喜欢的菜谱，网络失败会明确提示并支持重试',
     bg: 'linear-gradient(135deg, #FFB199, #FFD2C2)'
   },
   {
     emoji: '📅',
     title: '记录每一餐，看见成长',
-    desc: '打卡日历 + 营养雷达 + 同阶段妈妈圈',
+    desc: '只有明确确认餐次和份数后才记录；估算仅基于已记录菜谱，不代表全天摄入',
     bg: 'linear-gradient(135deg, #FF8866, #FF6644)'
   }
 ]

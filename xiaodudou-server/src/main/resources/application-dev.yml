@@ -8,14 +8,14 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
     # 端口 3307 走 Docker MySQL 8（避开本机已有的 5.7）
     url: jdbc:mysql://localhost:3307/xiaodudou?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
-    username: xiaodudou
-    password: XddApp@2026Mysql!    # 与 D:\docker\xiaodudou\.env 一致
+    username: ${DB_USERNAME:xiaodudou}
+    password: ${DB_PASSWORD:}
 
   data:
     redis:
       host: localhost
       port: 6379
-      password: XddRedis@2026!     # 与 D:\docker\xiaodudou\.env 一致
+      password: ${REDIS_PASSWORD:}
       database: 0
       timeout: 5s
       lettuce:
@@ -34,36 +34,47 @@ spring:
 # ⚠️ 真实 Key 通过环境变量注入，不要写死提交 Git
 # ============================
 xiaodudou:
+  features:
+    # 仅 dev/local 可通过环境变量显式开启；生产启动闸门始终禁止。
+    ai-enabled: ${XDD_AI_FEATURE_ENABLED:false}
   ai:
+    # Mock 必须通过环境变量显式开启，且运行时仅允许 dev/local profile 使用。
     zhipu:
-      api-key: ${ZHIPU_API_KEY:your-zhipu-key-here}
+      enabled: ${ZHIPU_ENABLED:false}
+      api-key: ${ZHIPU_API_KEY:}
       base-url: https://open.bigmodel.cn/api/paas/v4
       model-vision: glm-4v-plus
       model-chat: glm-4-plus
       timeout-ms: 8000
     tongyi:
-      api-key: ${TONGYI_API_KEY:your-tongyi-key-here}
+      api-key: ${TONGYI_API_KEY:}
       base-url: https://dashscope.aliyuncs.com/api/v1
   wechat:
     miniapp:
-      appid: ${WX_APPID:your-wx-appid}
-      secret: ${WX_SECRET:your-wx-secret}
-      enabled: false               # 没 AppID 时 false，自动走 Mock 登录
+      appid: ${WX_APPID:}
+      secret: ${WX_SECRET:}
+      enabled: ${WX_LOGIN_ENABLED:false}
       timeout-ms: 5000
     pay:
-      enabled: false               # 没商户号时 false，订单自动 Mock 支付成功
+      enabled: false               # 真实支付尚未实现，禁止开启
       mch-id: ${WX_PAY_MCHID:}
       api-key: ${WX_PAY_KEY:}
   order:
     expire-minutes: 30             # 订单 30 分钟未支付自动过期
-  content-audit:
-    tencent:
-      secret-id: ${TENCENT_SECRET_ID:}
-      secret-key: ${TENCENT_SECRET_KEY:}
   rate-limit:
     ai-free-daily: 5         # 免费用户每日 AI 调用（识别+推荐合并）
     ai-vip-daily: 50         # 会员每日
     ai-burst-per-min: 3      # 每用户每分钟最多 3 次（防刷点击）
+  mock:
+    login-enabled: ${XDD_MOCK_LOGIN_ENABLED:false}
+    ai-enabled: ${XDD_MOCK_AI_ENABLED:false}
+  commercial:
+    enabled: false
+  cors:
+    allowed-origins:
+      - http://localhost:5173
+      - http://127.0.0.1:5173
+    allow-credentials: true
 
 logging:
   level:

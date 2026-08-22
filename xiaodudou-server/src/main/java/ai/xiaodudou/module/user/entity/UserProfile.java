@@ -41,6 +41,10 @@ public class UserProfile implements Serializable {
 
     private String healthNotes;
 
+    /** 新写入画像只使用密文；历史明文字段由迁移器清空。 */
+    private String encryptedPayload;
+    private String encryptionKeyVersion;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 

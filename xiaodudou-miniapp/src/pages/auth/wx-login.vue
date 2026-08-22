@@ -3,7 +3,7 @@
     <view class="logo-area">
       <view class="logo">🤱</view>
       <view class="brand">小肚兜AI</view>
-      <view class="slogan">每一口都为孩子和妈妈定制</view>
+      <view class="slogan">记录、收藏并查看母婴阶段菜谱</view>
     </view>
 
     <view class="login-area">
@@ -22,7 +22,7 @@
     </view>
 
     <!-- #ifndef MP-WEIXIN -->
-    <view class="dev-tip">H5 演示模式 · 微信小程序端将走真实登录</view>
+    <view class="dev-tip">当前平台登录能力以部署配置为准</view>
     <!-- #endif -->
     <!-- #ifdef MP-WEIXIN -->
     <view class="dev-tip">点击即调用微信授权登录</view>
@@ -34,36 +34,41 @@
 import { ref } from 'vue'
 import { authApi } from '../../api/auth'
 import { useUserStore } from '../../store/user'
+import { ApiError } from '../../utils/request'
 
 const userStore = useUserStore()
 const loading = ref(false)
-const agreed = ref(true)
+const agreed = ref(false)
 
 /**
  * 获取登录 code
  * - 微信小程序：调用 uni.login 拿到真实 code
- * - H5/其他：用稳定 mock code（同设备同账号）
+ * - H5/其他：仅开发构建且显式开启 VITE_MOCK_LOGIN_ENABLED 时生成 Mock code
  */
 function openLegal(type: 'terms' | 'privacy') {
   uni.navigateTo({ url: `/pages/legal/${type}` })
 }
 
 function getLoginCode(): Promise<string> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     // #ifdef MP-WEIXIN
     uni.login({
       provider: 'weixin',
       success: (res) => {
         if (res.code) resolve(res.code)
-        else resolve('mock_fallback_' + Date.now())
+        else reject(new Error('微信未返回登录凭证，请重试'))
       },
-      fail: () => resolve('mock_fallback_' + Date.now())
+      fail: () => reject(new Error('微信登录失败，请检查网络后重试'))
     })
     // #endif
     // #ifndef MP-WEIXIN
-    const stable = uni.getStorageSync('mock_code') || `mock_${Date.now()}`
-    uni.setStorageSync('mock_code', stable)
-    resolve(stable)
+    if (import.meta.env.DEV && import.meta.env.VITE_MOCK_LOGIN_ENABLED === 'true') {
+      const stable = uni.getStorageSync('mock_code') || `dev_${Date.now()}`
+      uni.setStorageSync('mock_code', stable)
+      resolve(stable)
+    } else {
+      reject(new Error('当前平台暂不支持微信登录'))
+    }
     // #endif
   })
 }
@@ -79,15 +84,15 @@ async function doLogin() {
 
     const resp = await authApi.wxLogin({
       code,
-      nickname: '小肚兜妈妈',
-      avatarUrl: 'https://placehold.co/120x120/FF8866/ffffff?text=Mom'
+      nickname: undefined,
+      avatarUrl: undefined
     })
 
     userStore.setToken(resp.token)
     await userStore.loadMe()
 
     // 提示登录模式（H5/小程序未配 AppID 时是 mock）
-    if ((resp as any).loginMode === 'mock') {
+    if (resp.loginMode === 'mock') {
       console.log('[Auth] 当前为 Mock 登录模式（后端未配置真实微信 AppID）')
     }
 
@@ -98,6 +103,9 @@ async function doLogin() {
       uni.redirectTo({ url: '/pages/profile/setup' })
     }
   } catch (e) {
+    if (!(e instanceof ApiError)) {
+      uni.showToast({ title: e instanceof Error ? e.message : '登录失败，请稍后重试', icon: 'none' })
+    }
     console.error(e)
   } finally {
     loading.value = false

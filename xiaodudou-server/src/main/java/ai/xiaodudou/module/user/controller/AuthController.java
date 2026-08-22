@@ -1,18 +1,22 @@
 package ai.xiaodudou.module.user.controller;
 
 import ai.xiaodudou.common.result.Result;
+import ai.xiaodudou.common.exception.BusinessException;
+import ai.xiaodudou.common.result.ResultCode;
+import ai.xiaodudou.config.RuntimeModePolicy;
 import ai.xiaodudou.module.user.client.WechatClient;
 import ai.xiaodudou.module.user.client.WechatClient.Code2SessionResult;
 import ai.xiaodudou.module.user.entity.User;
-import ai.xiaodudou.module.user.mapper.UserMapper;
+import ai.xiaodudou.module.user.dto.WxLoginRequest;
+import ai.xiaodudou.module.user.dto.WxLoginResponse;
+import ai.xiaodudou.module.user.security.LoginRateLimiter;
+import ai.xiaodudou.module.user.service.AuthAccountService;
 import cn.dev33.satoken.annotation.SaIgnore;
 import cn.dev33.satoken.stp.StpUtil;
-import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.StrUtil;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import lombok.Data;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -20,16 +24,16 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import jakarta.validation.Valid;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Duration;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.HexFormat;
 
 /**
  * 鉴权接口
- * 双模式：
- *   - 真实模式：WechatClient.isReady() = true 时，调 jscode2session
- *   - Mock 模式：未配 AppID 或 enabled=false 时，用 code 作 fake openid
+ * 真实模式调用微信 jscode2session；开发 Mock 仅限 dev/local 且必须显式开启。
  */
 @Slf4j
 @Tag(name = "01 - 鉴权")
@@ -38,93 +42,65 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class AuthController {
 
-    private final UserMapper userMapper;
+    private final AuthAccountService accountService;
     private final WechatClient wechatClient;
     private final StringRedisTemplate redis;
-
-    @Data
-    public static class WxLoginReq {
-        /** wx.login() 返回的 code（真实模式必填；Mock 模式可任意）*/
-        private String code;
-        /** 用户授权的昵称（chooseNickName）*/
-        private String nickname;
-        /** 用户授权的头像（chooseAvatar）*/
-        private String avatarUrl;
-    }
+    private final RuntimeModePolicy runtimeModePolicy;
+    private final LoginRateLimiter loginRateLimiter;
 
     @SaIgnore
     @PostMapping("/wx-login")
-    @Operation(summary = "微信登录（双模式：真实 / Mock）")
-    public Result<Map<String, Object>> wxLogin(@RequestBody WxLoginReq req) {
+    @Operation(summary = "微信登录")
+    public Result<WxLoginResponse> wxLogin(@Valid @RequestBody WxLoginRequest req,
+                                           HttpServletRequest request) {
+        // 必须在调用微信前完成；Redis 故障时 fail-closed，避免失去防刷边界。
+        loginRateLimiter.check(request);
         String openid;
         String unionid = null;
         boolean realMode = wechatClient.isReady();
 
         if (realMode) {
             // ===== 真实模式：调微信 jscode2session =====
-            Code2SessionResult wxResult = wechatClient.code2Session(req.getCode());
+            Code2SessionResult wxResult = wechatClient.code2Session(req.code());
             openid = wxResult.getOpenid();
             unionid = wxResult.getUnionid();
 
             // session_key 服务端保留（用于解密用户信息/数据签名校验）
             // 永远不返回前端
             if (StrUtil.isNotBlank(wxResult.getSessionKey())) {
-                redis.opsForValue().set(
-                        "wx:session:" + openid,
-                        wxResult.getSessionKey(),
-                        Duration.ofDays(7)
-                );
+                try {
+                    redis.opsForValue().set(
+                            "wx:session:" + digest(openid),
+                            wxResult.getSessionKey(),
+                            Duration.ofDays(7)
+                    );
+                } catch (Exception e) {
+                    log.error("wechat_session_store_failed errorType={}", e.getClass().getSimpleName());
+                    throw new BusinessException(ResultCode.SERVICE_UNAVAILABLE, "登录服务暂时不可用，请稍后重试");
+                }
             }
-            log.info("[Auth] 真实微信登录成功 openid={}", openid);
+            log.info("wechat_login_succeeded mode=real");
         } else {
-            // ===== Mock 模式：用 code 作 fake openid（M1 演示）=====
-            String code = req.getCode();
-            if (StrUtil.isBlank(code)) code = IdUtil.simpleUUID().substring(0, 16);
+            if (!runtimeModePolicy.isMockLoginAllowed()) {
+                throw new BusinessException(ResultCode.LOGIN_FAILED,
+                        "真实微信登录尚未配置，当前环境禁止 Mock 登录");
+            }
+            // ===== 开发 Mock 模式：必须 dev/local + 显式开关 =====
+            String code = req.code();
+            if (StrUtil.isBlank(code)) {
+                throw new BusinessException(ResultCode.BAD_REQUEST, "code 不能为空");
+            }
             openid = "mock_" + code;
-            log.info("[Auth] Mock 登录 openid={}（请在 application-local.yml 配置真实 wechat 启用真实模式）", openid);
+            log.info("wechat_login_succeeded mode=mock");
         }
 
-        // ===== 查/建用户 =====
-        User user = userMapper.selectOne(
-                new LambdaQueryWrapper<User>().eq(User::getWxOpenid, openid));
-
-        if (user == null) {
-            user = new User();
-            user.setWxOpenid(openid);
-            user.setWxUnionid(unionid);
-            user.setNickname(StrUtil.isNotBlank(req.getNickname()) ? req.getNickname() : "小肚兜用户");
-            user.setAvatarUrl(req.getAvatarUrl());
-            user.setStatus(1);
-            user.setVipLevel(0);
-            userMapper.insert(user);
-            log.info("[Auth] 新用户注册 id={} mode={}", user.getId(), realMode ? "real" : "mock");
-        } else {
-            boolean changed = false;
-            if (StrUtil.isNotBlank(req.getNickname()) && !req.getNickname().equals(user.getNickname())) {
-                user.setNickname(req.getNickname());
-                changed = true;
-            }
-            if (StrUtil.isNotBlank(req.getAvatarUrl()) && !req.getAvatarUrl().equals(user.getAvatarUrl())) {
-                user.setAvatarUrl(req.getAvatarUrl());
-                changed = true;
-            }
-            if (StrUtil.isNotBlank(unionid) && !unionid.equals(user.getWxUnionid())) {
-                user.setWxUnionid(unionid);
-                changed = true;
-            }
-            if (changed) userMapper.updateById(user);
-        }
+        User user = accountService.findOrCreate(openid, unionid, req, realMode);
 
         StpUtil.login(user.getId());
 
-        Map<String, Object> data = new HashMap<>();
-        data.put("token", StpUtil.getTokenValue());
-        data.put("userId", user.getId());
-        data.put("nickname", user.getNickname());
-        data.put("avatarUrl", user.getAvatarUrl());
-        data.put("vipLevel", user.getVipLevel());
-        data.put("loginMode", realMode ? "real" : "mock");
-        return Result.ok(data);
+        return Result.ok(new WxLoginResponse(
+                StpUtil.getTokenValue(), user.getId(), user.getNickname(), user.getAvatarUrl(),
+                user.getVipLevel(), realMode ? "real" : "mock"));
     }
 
     @PostMapping("/logout")
@@ -132,5 +108,15 @@ public class AuthController {
     public Result<Void> logout() {
         StpUtil.logout();
         return Result.ok();
+    }
+
+    private static String digest(String value) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest, 0, 16);
+        } catch (Exception e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
     }
 }

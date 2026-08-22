@@ -1,0 +1,122 @@
+name: quality-gate
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Block newly introduced high-risk dependencies
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+          cache-dependency-path: xiaodudou-server/pom.xml
+
+      - name: Backend test and package
+        run: mvn -s scripts/maven-central-settings.xml -f xiaodudou-server/pom.xml clean verify
+
+      - name: Build and verify non-root backend image
+        shell: bash
+        run: |
+          docker build -t xiaodudou-server:ci xiaodudou-server
+          test "$(docker image inspect xiaodudou-server:ci --format '{{.Config.User}}')" = '10001:10001'
+          set +e
+          output=$(docker run --rm -e SPRING_PROFILES_ACTIVE=prod xiaodudou-server:ci 2>&1)
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo 'Production image unexpectedly started without required configuration.'
+            exit 1
+          fi
+          echo "$output" | grep -q '生产安全闸门拒绝启动'
+
+      - name: Production backend gate tests
+        run: mvn -s scripts/maven-central-settings.xml -f xiaodudou-server/pom.xml -Dtest=StartupSafetyValidatorTest test
+
+      - name: Repository safety rules and scan
+        shell: pwsh
+        run: |
+          ./scripts/repository-safety-check.ps1 -SelfTest
+          ./scripts/repository-safety-check.ps1
+
+      - name: Production backend preflight must fail without external secrets
+        shell: bash
+        run: |
+          set +e
+          output=$(pwsh -NoProfile -File ./scripts/production-preflight.ps1 2>&1)
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo 'Backend preflight unexpectedly passed without production secrets.'
+            exit 1
+          fi
+          echo "$output" | grep -q 'DB_URL'
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: xiaodudou-miniapp/package-lock.json
+
+      - name: Clean frontend install
+        working-directory: xiaodudou-miniapp
+        run: npm ci --registry=https://registry.npmjs.org
+
+      - name: Frontend tests and production dependency audit
+        working-directory: xiaodudou-miniapp
+        run: |
+          npm test
+          npm audit --omit=dev --registry=https://registry.npmjs.org
+          npm audit --audit-level=critical --registry=https://registry.npmjs.org
+
+      - name: H5 and WeChat builds
+        working-directory: xiaodudou-miniapp
+        env:
+          VITE_API_BASE_URL: https://api.example.invalid
+          VITE_AI_FEATURE_ENABLED: 'false'
+        run: |
+          npm run build:h5
+          npm run build:mp-weixin
+
+      - name: Production frontend gate must fail without real AppID
+        working-directory: xiaodudou-miniapp
+        env:
+          VITE_API_BASE_URL: https://api.example.invalid
+        run: |
+          set +e
+          output=$(npm run preflight:prod 2>&1)
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo 'Preflight unexpectedly passed without a real WeChat AppID.'
+            exit 1
+          fi
+          echo "$output" | grep -q 'AppID'
+
+      - name: Patch whitespace check
+        run: git diff --check

@@ -48,3 +48,7 @@ log/
 *.tmp
 *.temp
 *.swp
+*.bak
+*.backup
+*.dump
+*.sql.gz

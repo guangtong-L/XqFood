@@ -7,7 +7,7 @@
 | JDK | 17+ | LTS |
 | Maven | 3.8+ | |
 | MySQL | 8.0+ | 创建数据库 `xiaodudou` |
-| Redis | 7.0+ | 默认无密码 |
+| Redis | 7.0+ | 必须配置认证，凭据由环境安全注入 |
 
 ## 启动步骤
 
@@ -19,13 +19,21 @@ CREATE DATABASE xiaodudou DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_
 
 ### 2. 修改配置
 
-打开 `src/main/resources/application-dev.yml`，修改：
+通过环境变量或本地忽略配置注入数据库凭据，不要修改并提交仓库配置：
 
 ```yaml
 spring:
   datasource:
-    password: 改为你的本地 MySQL 密码
+    password: ${DB_PASSWORD:}
 ```
+
+敏感画像要求注入 `XDD_DATA_ENCRYPTION_KEY`（32 字节随机密钥的 Base64 编码）并妥善管理密钥版本；AI 最小运行日志通过 `AI_LOG_RETENTION_DAYS` 配置 1 至 365 天保留期。密钥不得写入日志、命令输出或前端产物。
+
+本地开发首次启用画像前，应使用系统安全随机数生成器生成 32 字节密钥，例如 `openssl rand -base64 32`，并只写入已被 Git 忽略的本地 `.env` 或 `application-local.yml`。不得在每次启动时重新生成，也不要把生成结果粘贴到聊天、工单或测试日志。至少制作一份加密离线备份，并实际验证能够恢复；本地密钥丢失后，已经写入的画像密文无法解密，只能在确认全部为测试数据后清理并重建。
+
+普通 Spring Boot 进程不会自动加载任意目录下的 `.env`；本地启动时必须通过 IDE 的 env-file 支持、容器 `--env-file` 或不打印变量值的本地启动脚本，将同一份 `XDD_DATA_ENCRYPTION_KEY` 注入进程。可检查“变量存在”和“Base64 解码后为 32 字节”，但禁止打印变量内容。
+
+生产环境必须由密钥管理系统生成、托管和审计密钥，并保存受控的灾备副本。生产密钥丢失属于不可逆数据事故：所有对应版本画像将永久无法解密，不能用“生成新密钥”修复。轮换时必须保留旧版本密钥，完成全量重加密和恢复演练后才能退役旧密钥。
 
 ### 3. 启动 Redis
 
@@ -75,7 +83,8 @@ xiaodudou-server/
         ├── application-dev.yml
         ├── logback-spring.xml
         └── db/migration/                 # Flyway 迁移
-            └── V1__init_schema.sql       # M1 schema
+            ├── V1__init_schema.sql       # 不可变历史 schema
+            └── V6__encrypt_profiles_and_minimize_ai_logs.sql
 ```
 
 ## 关键约定
@@ -83,12 +92,11 @@ xiaodudou-server/
 - **接口前缀**：所有业务接口以 `/api/v1/` 开头
 - **错误码**：见 `common/result/ResultCode.java`，按 1xxxx~7xxxx 分段
 - **鉴权**：默认所有 `/api/**` 都需登录，免登录接口在 `SaTokenConfig` 中显式放行
-- **DB 迁移**：新增表用 `V{n}__xxx.sql`，**禁止直接改 V1**
+- **DB 迁移**：新增变更使用下一版本迁移，**禁止修改任何已发布迁移**
 
-## 待办（按 M1 计划）
+## 当前安全边界
 
-- [ ] W2 用户/档案接口
-- [ ] W2 食谱基础库（300 条月子菜谱）
-- [ ] W3 AI 识别接口
-- [ ] W3 AI 推荐接口
-- [ ] W4 内容审核 + 监控告警
+- 用户画像通过统一服务加密读写；历史明文画像由生产启动迁移器分批转换。
+- 妈妈圈、会员、支付和退款仍保持关闭。
+- AI 生产总闸门强制关闭，开发环境也必须同时显式开启功能与真实/Mock 开关才可测试。
+- 真实内容安全审核供应商与生产监控尚未完成；完成输入/输出审核、故障失败关闭、安全/法务验收和灰度回归前不得开启 AI，也不能宣称已经具备。

@@ -9,7 +9,7 @@
         {
             "path": "pages/index/index",
             "style": {
-                "navigationBarTitleText": "小肚兜AI",
+                "navigationBarTitleText": "小肚兜",
                 "enablePullDownRefresh": true
             }
         },
@@ -108,7 +108,7 @@
         {
             "path": "pages/vip/center",
             "style": {
-                "navigationBarTitleText": "开通会员"
+                "navigationBarTitleText": "会员服务"
             }
         },
         {
@@ -144,7 +144,7 @@
     ],
     "globalStyle": {
         "navigationBarTextStyle": "black",
-        "navigationBarTitleText": "小肚兜AI",
+        "navigationBarTitleText": "小肚兜",
         "navigationBarBackgroundColor": "#FFFFFF",
         "backgroundColor": "#F7F7F7"
     },
@@ -165,18 +165,6 @@
                 "text": "菜谱",
                 "iconPath": "static/tabbar/recipe.png",
                 "selectedIconPath": "static/tabbar/recipe-active.png"
-            },
-            {
-                "pagePath": "pages/camera/index",
-                "text": "拍照",
-                "iconPath": "static/tabbar/camera.png",
-                "selectedIconPath": "static/tabbar/camera-active.png"
-            },
-            {
-                "pagePath": "pages/community/index",
-                "text": "圈子",
-                "iconPath": "static/tabbar/community.png",
-                "selectedIconPath": "static/tabbar/community-active.png"
             },
             {
                 "pagePath": "pages/me/index",

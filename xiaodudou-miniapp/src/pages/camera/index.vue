@@ -1,6 +1,13 @@
 <template>
   <view class="page">
-    <view class="hint">把冰箱内食材尽量平铺，AI 识别更准</view>
+    <view v-if="!AI_FEATURE_ENABLED" class="feature-closed">
+      <view class="closed-icon">🍲</view>
+      <view class="closed-title">AI 拍照识别暂未开放</view>
+      <view class="closed-desc">内容安全审核能力仍在接入验收中，您可以继续浏览菜谱、收藏和记录已食用菜谱。</view>
+      <button class="closed-action" @tap="goRecipes">去浏览菜谱</button>
+    </view>
+    <template v-else>
+    <view class="hint">请拍摄食材图片，识别结果需要人工确认</view>
 
     <view class="preview-frame">
       <image v-if="imgUrl" :src="imgUrl" mode="aspectFit" class="preview-img" />
@@ -24,10 +31,11 @@
           <view class="progress-inner" :style="{ width: progress + '%' }"></view>
         </view>
         <view class="loading-time">已等待 {{ elapsedSec }} s</view>
-        <view class="loading-tip">智谱 GLM-4V 通常需要 15-40 秒</view>
+        <view class="loading-tip">处理时间受网络与外部服务状态影响</view>
         <view class="loading-cancel" @tap="cancelUpload">取消并手动添加</view>
       </view>
     </view>
+    </template>
   </view>
 </template>
 
@@ -36,19 +44,21 @@ import { ref, onUnmounted } from 'vue'
 import { aiApi } from '../../api/ai'
 import { useUserStore } from '../../store/user'
 import { feedback } from '../../utils/feedback'
+import { AI_FEATURE_ENABLED } from '../../config/features'
 
 const imgUrl = ref('')
 const loading = ref(false)
 const progress = ref(0)
 const progressText = ref('准备上传...')
 const elapsedSec = ref(0)
-
 const userStore = useUserStore()
+
 let progressTimer: ReturnType<typeof setInterval> | null = null
 let elapsedTimer: ReturnType<typeof setInterval> | null = null
 let cancelled = false
 
 function chooseFromAlbum() {
+  if (loading.value) return
   uni.chooseImage({
     count: 1, sourceType: ['album'],
     success: (res) => { imgUrl.value = res.tempFilePaths[0]; upload(res.tempFilePaths[0]) }
@@ -56,6 +66,7 @@ function chooseFromAlbum() {
 }
 
 function takePhoto() {
+  if (loading.value) return
   uni.chooseImage({
     count: 1, sourceType: ['camera'],
     success: (res) => { imgUrl.value = res.tempFilePaths[0]; upload(res.tempFilePaths[0]) }
@@ -65,6 +76,8 @@ function takePhoto() {
 function manualInput() {
   uni.navigateTo({ url: '/pages/camera/result?manual=1' })
 }
+
+function goRecipes() { uni.switchTab({ url: '/pages/recipe/list' }) }
 
 function startProgress() {
   progress.value = 0
@@ -79,7 +92,7 @@ function startProgress() {
       if (progress.value < 15) progressText.value = '上传图片中...'
       else if (progress.value < 40) progressText.value = 'AI 视觉模型识别中...'
       else if (progress.value < 65) progressText.value = '整理食材清单...'
-      else if (progress.value < 80) progressText.value = '匹配阶段营养需求...'
+      else if (progress.value < 80) progressText.value = '校验识别结果...'
       else progressText.value = '马上好了...'
     }
   }, 500)
@@ -106,6 +119,7 @@ function cancelUpload() {
 }
 
 async function upload(filePath: string) {
+  if (loading.value) return
   if (!userStore.isLoggedIn) {
     feedback.toast('请先登录')
     setTimeout(() => uni.navigateTo({ url: '/pages/auth/wx-login' }), 600)
@@ -115,13 +129,13 @@ async function upload(filePath: string) {
   startProgress()
 
   try {
-    const stageHint = userStore.profile?.stageType
-    const data = await aiApi.recognize(filePath, stageHint)
+    const data = await aiApi.recognize(filePath)
 
     if (cancelled) return  // 用户已取消，不再跳转
 
     stopProgress(true)
     uni.setStorageSync('recognized_ingredients', data.ingredients)
+    uni.setStorageSync('recognized_ai_meta', { aiLabel: data.aiLabel, fallback: data.fallback })
     setTimeout(() => {
       loading.value = false
       uni.navigateTo({ url: '/pages/camera/result' })
@@ -144,6 +158,12 @@ onUnmounted(() => {
 
 <style lang="scss" scoped>
 .page { padding: 32rpx; min-height: 100vh; background: #fff; }
+.feature-closed { padding: 180rpx 40rpx; text-align: center;
+  .closed-icon { font-size: 112rpx; }
+  .closed-title { margin-top: 28rpx; font-size: 34rpx; font-weight: 600; }
+  .closed-desc { margin-top: 20rpx; color: #777; font-size: 26rpx; line-height: 1.7; }
+  .closed-action { margin-top: 48rpx; min-height: 88rpx; border-radius: 44rpx; background: #FF8866; color: #fff; }
+}
 .hint { text-align: center; font-size: 26rpx; color: #999; margin-bottom: 32rpx; }
 .preview-frame { width: 100%; height: 600rpx; background: #F7F7F7; border-radius: 24rpx;
   display: flex; align-items: center; justify-content: center; margin-bottom: 48rpx; overflow: hidden;
